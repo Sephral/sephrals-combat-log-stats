@@ -1,0 +1,34 @@
+{
+  "id": "sephrals-combat-log-stats",
+  "title": "Sephral’s Combat Log & Stats",
+  "description": "Track Foundry combat events as a persistent ledger, compute honest combat statistics and DPR, and let GMs share selected summaries with players.",
+  "version": "0.1.0",
+  "compatibility": {
+    "minimum": 13,
+    "verified": "14.361"
+  },
+  "authors": [
+    {
+      "name": "Sephral"
+    }
+  ],
+  "url": "https://github.com/Sephral/sephrals-combat-log-stats.git",
+  "esmodules": [
+    "scripts/scls-entry-20260517v.js"
+  ],
+  "styles": [
+    "styles/scls.css"
+  ],
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json"
+    },
+    {
+      "lang": "de",
+      "name": "Deutsch",
+      "path": "lang/de.json"
+    }
+  ]
+}

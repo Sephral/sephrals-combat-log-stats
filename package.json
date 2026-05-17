@@ -1,0 +1,16 @@
+{
+  "name": "sephrals-combat-log-stats",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node build/check.mjs",
+    "check:manifest": "node build/validate-manifest.mjs",
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage",
+    "release:prepare": "node build/prepare-release.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,228 @@
+<div class="scls-app">
+  {{#unless hasLog}}
+  <section class="scls-empty" {{#if hasHistory}}hidden{{/if}}>
+    <h2>{{sclsLocalize "SCLS.App.NoLogTitle"}}</h2>
+    <p>{{sclsLocalize "SCLS.App.NoLog"}}</p>
+  </section>
+  {{/unless}}
+
+  {{#if tabs.length}}
+  <nav class="scls-tabs">
+    {{#each tabs}}
+    <button type="button" class="{{#if this.active}}is-active{{/if}}" data-action="switchTab" data-tab="{{this.id}}">{{this.label}}</button>
+    {{/each}}
+  </nav>
+  {{/if}}
+
+  <main class="scls-body">
+    <section class="scls-panel" data-panel="history">
+      <h3>{{sclsLocalize "SCLS.Tab.history"}}</h3>
+      {{#if historyRows.length}}
+      <table class="scls-table scls-history-table">
+        <thead><tr><th>{{sclsLocalize "SCLS.Label.Combat"}}</th><th>{{sclsLocalize "SCLS.Label.Status"}}</th><th>{{sclsLocalize "SCLS.Label.Started"}}</th><th>{{sclsLocalize "SCLS.Label.Ended"}}</th><th>{{sclsLocalize "SCLS.Label.Rounds"}}</th><th>{{sclsLocalize "SCLS.Label.Participants"}}</th><th>{{sclsLocalize "SCLS.Label.NetDamage"}}</th><th>{{sclsLocalize "SCLS.Label.PartyDPR"}}</th><th>{{sclsLocalize "SCLS.Label.Actions"}}</th></tr></thead>
+        <tbody>
+          {{#each historyRows}}
+          <tr class="{{#if this.selected}}is-selected{{/if}}">
+            <td><strong>{{this.title}}</strong><span>{{this.loadedLabel}}</span></td>
+            <td><span class="scls-status scls-status--{{this.status}}">{{this.statusLabel}}</span></td>
+            <td>{{this.startedLabel}}</td>
+            <td>{{this.endedLabel}}</td>
+            <td>{{this.rounds}}</td>
+            <td>{{this.participantCount}}</td>
+            <td>{{this.netDamageApplied}}</td>
+            <td>{{this.partyDPR}}</td>
+            <td><button type="button" data-action="openLog" data-log-id="{{this.combatLogId}}">{{sclsLocalize "SCLS.Button.Open"}}</button></td>
+          </tr>
+          {{/each}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="scls-muted">{{sclsLocalize "SCLS.Label.NoHistory"}}</p>
+      {{/if}}
+    </section>
+
+  {{#if hasLog}}
+  <header class="scls-header" data-detail-only>
+    <div class="scls-title-block">
+      <h2>{{log.title}}</h2>
+      <div class="scls-meta-line"><span>{{summary.status}}</span><span>{{summary.rounds}} {{sclsLocalize "SCLS.Label.Rounds"}}</span><span>{{summary.sessionCount}} {{sclsLocalize "SCLS.Label.Sessions"}}</span></div>
+    </div>
+    <div class="scls-header__stats scls-header__stats--damage">
+      <strong>{{computed.summary.netDamageApplied}}</strong>
+      <span>{{sclsLocalize "SCLS.Label.NetDamage"}}</span>
+    </div>
+    <div class="scls-header__stats scls-header__stats--dpr">
+      <strong>{{computed.dpr.partyDPR}}</strong>
+      <span>{{sclsLocalize "SCLS.Label.PartyDPR"}}</span>
+    </div>
+  </header>
+
+    <section class="scls-panel" data-panel="summary">
+      <h3>{{sclsLocalize "SCLS.Tab.summary"}}</h3>
+      <div class="scls-grid scls-grid--cards">
+        <div class="scls-metric"><span>{{sclsLocalize "SCLS.Label.Started"}}</span><strong>{{summary.startedAt}}</strong></div>
+        <div class="scls-metric"><span>{{sclsLocalize "SCLS.Label.Ended"}}</span><strong>{{summary.endedAt}}</strong></div>
+        <div class="scls-metric"><span>{{sclsLocalize "SCLS.Label.Duration"}}</span><strong>{{summary.activeDuration}}</strong></div>
+        <div class="scls-metric"><span>{{sclsLocalize "SCLS.Label.Participants"}}</span><strong>{{summary.participants}}</strong></div>
+        <div class="scls-metric scls-metric--damage"><span>{{sclsLocalize "SCLS.Label.GrossDamage"}}</span><strong>{{computed.summary.grossDamageApplied}}</strong></div>
+        <div class="scls-metric scls-metric--damage"><span>{{sclsLocalize "SCLS.Label.NetDamage"}}</span><strong>{{computed.summary.netDamageApplied}}</strong></div>
+        <div class="scls-metric scls-metric--correction"><span>{{sclsLocalize "SCLS.Label.Corrections"}}</span><strong>+{{computed.summary.damageCorrectionsUp}} / -{{computed.summary.damageCorrectionsDown}}</strong></div>
+        <div class="scls-metric scls-metric--healing"><span>{{sclsLocalize "SCLS.Label.NetHealing"}}</span><strong>{{computed.summary.netHealingApplied}}</strong></div>
+      </div>
+      {{#if computed.warnings.length}}
+      <div class="scls-warning-list">
+        {{#each computed.warnings}}<p>{{this}}</p>{{/each}}
+      </div>
+      {{/if}}
+    </section>
+
+    <section class="scls-panel" data-panel="dpr">
+      <h3>{{sclsLocalize "SCLS.Tab.dpr"}}</h3>
+      <div class="scls-grid scls-grid--cards">
+        <div class="scls-metric scls-metric--friendly"><span>{{sclsLocalize "SCLS.Label.PartyDPR"}}</span><strong>{{computed.dpr.partyDPR}}</strong></div>
+        <div class="scls-metric scls-metric--hostile"><span>{{sclsLocalize "SCLS.Label.EnemyDPR"}}</span><strong>{{computed.dpr.enemyDPR}}</strong></div>
+        <div class="scls-metric"><span>{{sclsLocalize "SCLS.Label.NeutralDPR"}}</span><strong>{{computed.dpr.neutralDPR}}</strong></div>
+        <div class="scls-metric"><span>{{sclsLocalize "SCLS.Label.UnknownDPR"}}</span><strong>{{computed.dpr.unknownDPR}}</strong></div>
+      </div>
+      <table class="scls-table">
+        <thead><tr><th>{{sclsLocalize "SCLS.Label.Combatant"}}</th><th>{{sclsLocalize "SCLS.Label.Side"}}</th><th>{{sclsLocalize "SCLS.Label.DamageRolled"}}</th><th>{{sclsLocalize "SCLS.Label.GrossApplied"}}</th><th>{{sclsLocalize "SCLS.Label.Corrections"}}</th><th>{{sclsLocalize "SCLS.Label.NetDamage"}}</th><th>{{sclsLocalize "SCLS.Label.NetDPR"}}</th><th>{{sclsLocalize "SCLS.Label.Confidence"}}</th></tr></thead>
+        <tbody>
+          {{#each dprRows}}
+          <tr><td>{{this.name}}</td><td>{{this.side}}</td><td>{{this.damageRolled}}</td><td>{{this.damageAppliedGross}}</td><td>+{{this.damageCorrectionsUp}} / -{{this.damageCorrectionsDown}}</td><td>{{this.damageAppliedNet}}</td><td>{{this.netDPR}}</td><td>{{this.unclearEvents}} unclear</td></tr>
+          {{/each}}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="scls-panel" data-panel="corrections">
+      <h3>{{sclsLocalize "SCLS.Tab.corrections"}}</h3>
+      <p class="scls-muted">{{sclsLocalize "SCLS.Label.AutomaticCorrections"}}</p>
+      {{#if manualAdjustmentEvents.length}}
+      <h4>{{sclsLocalize "SCLS.Manual.History"}}</h4>
+      <table class="scls-table">
+        <thead><tr><th>{{sclsLocalize "SCLS.Label.Started"}}</th><th>{{sclsLocalize "SCLS.Label.Combatant"}}</th><th>{{sclsLocalize "SCLS.Manual.Type"}}</th><th>{{sclsLocalize "SCLS.Manual.Amount"}}</th><th>{{sclsLocalize "SCLS.Manual.Note"}}</th><th>{{sclsLocalize "SCLS.Label.Actions"}}</th></tr></thead>
+        <tbody>
+          {{#each manualAdjustmentEvents}}
+          <tr class="{{#if this.ignored}}is-muted{{/if}}">
+            <td>{{this.createdLabel}}</td>
+            <td>{{this.participantName}}</td>
+            <td>{{this.label}}</td>
+            <td>{{this.amount}}</td>
+            <td>{{this.note}}</td>
+            <td>
+              {{#if this.ignored}}
+              <button type="button" data-action="restoreEvent" data-event-id="{{this.id}}">{{sclsLocalize "SCLS.Button.Restore"}}</button>
+              {{else}}
+              <button type="button" data-action="ignoreEvent" data-event-id="{{this.id}}">{{sclsLocalize "SCLS.Button.Ignore"}}</button>
+              {{/if}}
+            </td>
+          </tr>
+          {{/each}}
+        </tbody>
+      </table>
+      {{/if}}
+      {{#if correctionEvents.length}}
+      <table class="scls-table">
+        <thead><tr><th>{{sclsLocalize "SCLS.Label.Event"}}</th><th>{{sclsLocalize "SCLS.Label.Delta"}}</th><th>{{sclsLocalize "SCLS.Label.Interpretation"}}</th><th>{{sclsLocalize "SCLS.Label.Confidence"}}</th><th>{{sclsLocalize "SCLS.Label.Actions"}}</th></tr></thead>
+        <tbody>
+          {{#each correctionEvents}}
+          <tr>
+            <td>{{this.type}}</td>
+            <td>{{this.data.oldValue}} → {{this.data.newValue}} ({{this.data.delta}})</td>
+            <td>
+              <select data-action="classify" data-event-id="{{this.id}}">
+                {{#each this.interpretationOptions}}
+                <option value="{{this.value}}" {{#if this.selected}}selected{{/if}}>{{this.label}}</option>
+                {{/each}}
+              </select>
+            </td>
+            <td>{{this.confidence}}</td>
+            <td>
+              {{#if this.ignored}}
+              <button type="button" data-action="restoreEvent" data-event-id="{{this.id}}">{{sclsLocalize "SCLS.Button.Restore"}}</button>
+              {{else}}
+              <button type="button" data-action="ignoreEvent" data-event-id="{{this.id}}">{{sclsLocalize "SCLS.Button.Ignore"}}</button>
+              {{/if}}
+            </td>
+          </tr>
+          {{/each}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="scls-muted">{{sclsLocalize "SCLS.Label.NoCorrections"}}</p>
+      {{/if}}
+    </section>
+
+    <section class="scls-panel" data-panel="participants">
+      <h3>{{sclsLocalize "SCLS.Tab.participants"}}</h3>
+      <table class="scls-table">
+        <thead><tr><th>{{sclsLocalize "SCLS.Label.Name"}}</th><th>{{sclsLocalize "SCLS.Label.Side"}}</th><th>{{sclsLocalize "SCLS.Label.Initiative"}}</th><th>{{sclsLocalize "SCLS.Label.NetDamage"}}</th><th>{{sclsLocalize "SCLS.Label.NetDPR"}}</th></tr></thead>
+        <tbody>
+          {{#each participants}}
+          <tr>
+            <td><img src="{{this.img}}" alt=""> {{this.name}}</td>
+            <td><select data-action="setSide" data-combatant-id="{{this.combatantId}}">{{#each this.sideOptions}}<option value="{{this.value}}" {{#if this.selected}}selected{{/if}}>{{this.label}}</option>{{/each}}</select></td>
+            <td>{{this.initiative}}</td>
+            <td>{{this.stats.damageAppliedNet}}</td>
+            <td>{{this.stats.netDPR}}</td>
+          </tr>
+          {{/each}}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="scls-panel" data-panel="timeline">
+      <h3>{{sclsLocalize "SCLS.Tab.timeline"}}</h3>
+      <ol class="scls-timeline">
+        {{#each timelineEvents}}
+        <li><span>{{this.createdLabel}}</span><strong>{{this.label}}</strong><em>{{this.confidence}}</em></li>
+        {{/each}}
+      </ol>
+    </section>
+
+    <section class="scls-panel" data-panel="statistics">
+      <h3>{{sclsLocalize "SCLS.Tab.statistics"}}</h3>
+      <table class="scls-table">
+        <thead><tr><th>{{sclsLocalize "SCLS.Label.Side"}}</th><th>{{sclsLocalize "SCLS.Label.DamageRolled"}}</th><th>{{sclsLocalize "SCLS.Label.GrossApplied"}}</th><th>{{sclsLocalize "SCLS.Label.NetDamage"}}</th><th>{{sclsLocalize "SCLS.Label.NetDPR"}}</th></tr></thead>
+        <tbody>
+          {{#each sideRows}}
+          <tr><td>{{this.name}}</td><td>{{this.damageRolled}}</td><td>{{this.damageAppliedGross}}</td><td>{{this.damageAppliedNet}}</td><td>{{this.netDPR}}</td></tr>
+          {{/each}}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="scls-panel" data-panel="sharing">
+      <h3>{{sclsLocalize "SCLS.Tab.sharing"}}</h3>
+      <form class="scls-share-form">
+        <label><input type="checkbox" name="isShared" {{#if log.shareSettings.isShared}}checked{{/if}}> {{sclsLocalize "SCLS.Share.Enable"}}</label>
+        <label>{{sclsLocalize "SCLS.Share.Mode"}} <select name="shareMode">{{#each shareModes}}<option value="{{this.value}}" {{#if this.selected}}selected{{/if}}>{{this.label}}</option>{{/each}}</select></label>
+        <label><input type="checkbox" name="includePartyStats" {{#if log.shareSettings.includePartyStats}}checked{{/if}}> {{sclsLocalize "SCLS.Share.PartyStats"}}</label>
+        <label><input type="checkbox" name="includeEnemyStats" {{#if log.shareSettings.includeEnemyStats}}checked{{/if}}> {{sclsLocalize "SCLS.Share.EnemyStats"}}</label>
+        <label><input type="checkbox" name="includeDPR" {{#if log.shareSettings.includeDPR}}checked{{/if}}> {{sclsLocalize "SCLS.Share.DPR"}}</label>
+        <label><input type="checkbox" name="includeTimeline" {{#if log.shareSettings.includeTimeline}}checked{{/if}}> {{sclsLocalize "SCLS.Share.Timeline"}}</label>
+        <label><input type="checkbox" name="includeCorrections" {{#if log.shareSettings.includeCorrections}}checked{{/if}}> {{sclsLocalize "SCLS.Share.Corrections"}}</label>
+        <label><input type="checkbox" name="includePrivateRolls" {{#if log.shareSettings.includePrivateRolls}}checked{{/if}}> {{sclsLocalize "SCLS.Share.PrivateRolls"}}</label>
+        <label><input type="checkbox" name="includeGMNotes" {{#if log.shareSettings.includeGMNotes}}checked{{/if}}> {{sclsLocalize "SCLS.Share.GMNotes"}}</label>
+        <label><input type="checkbox" name="includeUnclearEvents" {{#if log.shareSettings.includeUnclearEvents}}checked{{/if}}> {{sclsLocalize "SCLS.Share.Unclear"}}</label>
+        <label><input type="checkbox" name="anonymizeEnemies" {{#if log.shareSettings.anonymizeEnemies}}checked{{/if}}> {{sclsLocalize "SCLS.Share.Anonymize"}}</label>
+        <label><input type="checkbox" name="allowPlayersToOpenReport" {{#if log.shareSettings.allowPlayersToOpenReport}}checked{{/if}}> {{sclsLocalize "SCLS.Share.PlayerOpen"}}</label>
+        <button type="button" data-action="toggleSharing">{{sclsLocalize "SCLS.Button.SaveSharing"}}</button>
+        <button type="button" data-action="postPlayerReport" {{#unless canShareReport}}disabled{{/unless}}>{{sclsLocalize "SCLS.Button.PostPlayerReport"}}</button>
+        <button type="button" data-action="createJournalReport" {{#unless canShareReport}}disabled{{/unless}}>{{sclsLocalize "SCLS.Button.CreateJournalReport"}}</button>
+      </form>
+    </section>
+
+    <section class="scls-panel" data-panel="raw">
+      <h3>{{sclsLocalize "SCLS.Tab.raw"}}</h3>
+      <details><summary>{{rawEvents.length}} {{sclsLocalize "SCLS.Label.RawEvents"}}</summary><pre>{{sclsJson rawEvents}}</pre></details>
+    </section>
+
+    <section class="scls-panel" data-panel="export">
+      <h3>{{sclsLocalize "SCLS.Tab.export"}}</h3>
+      <button type="button" data-action="exportJson">{{sclsLocalize "SCLS.Button.ExportJson"}}</button>
+      <button type="button" data-action="exportMarkdown">{{sclsLocalize "SCLS.Button.ExportMarkdown"}}</button>
+    </section>
+  {{/if}}
+  </main>
+</div>

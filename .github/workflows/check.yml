@@ -1,0 +1,29 @@
+name: Check
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Run script syntax check
+        run: npm run check
+
+      - name: Run tests
+        run: npm test
+
+      - name: Run manifest validation
+        run: npm run check:manifest
