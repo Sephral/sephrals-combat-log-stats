@@ -1,4 +1,4 @@
-import { CONFIDENCE, EVENT_TYPES, HOOKS, MODULE_ID, RESOURCE_INTERPRETATIONS, SETTINGS, SHARE_MODES, SIDES, SOURCE_KINDS, TABS, VISIBILITY } from "../constants.js";
+import { CONFIDENCE, EVENT_TYPES, HOOKS, MODULE_ID, RESOURCE_INTERPRETATIONS, SETTINGS, SHARE_MODES, SIDES, TABS } from "../constants.js";
 import { getSetting } from "../settings.js";
 import { escapeHtml, formatDateTime, formatDuration, localize, renderAppTemplate } from "../utils.js";
 import { CombatLogExportService } from "../services/export-service.js";
@@ -20,7 +20,6 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     actions: {
       switchTab: CombatLogApp.#onTab,
       classify: CombatLogApp.#onClassify,
-      addManualAdjustment: CombatLogApp.#onAddManualAdjustment,
       ignoreEvent: CombatLogApp.#onIgnoreEvent,
       restoreEvent: CombatLogApp.#onRestoreEvent,
       setSide: CombatLogApp.#onSetSide,
@@ -99,8 +98,6 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       correctionEvents: correctionEvents(log),
       manualAdjustmentEvents: manualAdjustmentEvents(log),
       participants: participantRows(log),
-      manualAdjustmentParticipants: manualAdjustmentParticipants(log),
-      manualAdjustmentTypes: manualAdjustmentTypes(),
       dprRows: sortedDprRows(log, this.dprSort),
       dprColumns: dprColumns(this.dprSort),
       sideRows: computed.dpr?.bySide ?? [],
@@ -192,41 +189,6 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       default:
         return null;
     }
-  }
-
-  static async #onAddManualAdjustment(_event, target) {
-    const log = await this.getLog();
-    if (!log) return;
-    const form = target.closest("form");
-    const formData = new FormData(form);
-    const amount = Math.abs(Number(formData.get("amount")));
-    if (!Number.isFinite(amount) || amount <= 0) return;
-    const adjustmentType = String(formData.get("adjustmentType") ?? "");
-    const eventType = manualAdjustmentEventType(adjustmentType);
-    if (!eventType) return;
-    const combatantId = String(formData.get("combatantId") ?? "");
-    const participant = log.participants?.find((entry) => entry.combatantId === combatantId) ?? null;
-    log.events.push({
-      id: foundry?.utils?.randomID?.() ?? `manual-${Date.now()}`,
-      type: eventType,
-      createdAt: new Date().toISOString(),
-      sequence: (log.events?.length ?? 0) + 1,
-      round: game?.combat?.round ?? null,
-      turn: game?.combat?.turn ?? null,
-      combatantId: participant?.combatantId ?? combatantId,
-      actorUuid: participant?.actorUuid ?? "",
-      tokenUuid: participant?.tokenUuid ?? "",
-      sceneUuid: log.sceneUuid,
-      userId: game?.user?.id ?? "",
-      visibility: VISIBILITY.GM,
-      source: { kind: SOURCE_KINDS.MANUAL, id: adjustmentType },
-      confidence: CONFIDENCE.MANUAL,
-      ignored: false,
-      tags: ["manual-adjustment"],
-      data: { amount, adjustmentType, note: String(formData.get("note") ?? "") }
-    });
-    form.reset();
-    await this.saveLog(log);
   }
 
   static async #onIgnoreEvent(_event, target) {
@@ -855,29 +817,6 @@ function sideOptions(selectedSide) {
 
 function interpretationOptions(selectedInterpretation) {
   return Object.values(RESOURCE_INTERPRETATIONS).map((value) => ({ value, label: localize(`SCLS.Interpretation.${value}`), selected: value === selectedInterpretation }));
-}
-
-function manualAdjustmentParticipants(log) {
-  return (log.participants ?? []).map((participant) => ({ value: participant.combatantId, label: participant.name }));
-}
-
-function manualAdjustmentTypes() {
-  return [
-    { value: "damageAdd", label: localize("SCLS.Manual.damageAdd") },
-    { value: "damageReduce", label: localize("SCLS.Manual.damageReduce") },
-    { value: "healingAdd", label: localize("SCLS.Manual.healingAdd") },
-    { value: "healingReduce", label: localize("SCLS.Manual.healingReduce") }
-  ];
-}
-
-function manualAdjustmentEventType(adjustmentType) {
-  switch (adjustmentType) {
-    case "damageAdd": return EVENT_TYPES.DAMAGE_MANUAL_ADDED;
-    case "damageReduce": return EVENT_TYPES.DAMAGE_MANUAL_REDUCED;
-    case "healingAdd": return EVENT_TYPES.HEALING_MANUAL_ADDED;
-    case "healingReduce": return EVENT_TYPES.HEALING_MANUAL_REDUCED;
-    default: return null;
-  }
 }
 
 function isManualAdjustmentEvent(event) {
