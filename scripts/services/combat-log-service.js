@@ -54,10 +54,19 @@ export class CombatLogService {
     const existing = this.activeLogs.get(combat.id);
     if (existing) return existing;
     const log = createCombatLog(combat, this.adapter);
+    this.applyDefaultShareSettings(log);
     new CombatEventLedger(log).combatStarted(combat);
     this.activeLogs.set(combat.id, log);
     this.captureActorSnapshots(combat);
     return this.saveAndCompute(log);
+  }
+
+  applyDefaultShareSettings(log) {
+    log.shareSettings = {
+      ...log.shareSettings,
+      shareMode: getSetting(SETTINGS.DEFAULT_SHARE_MODE, log.shareSettings?.shareMode ?? "gmOnly"),
+      anonymizeEnemies: getSetting(SETTINGS.DEFAULT_ANONYMIZE_ENEMIES, log.shareSettings?.anonymizeEnemies ?? true)
+    };
   }
 
   async endCombat(combat, reason = SEGMENT_REASONS.COMBAT_ENDED) {
@@ -160,6 +169,37 @@ export class CombatLogService {
       data: { name: combatant.name }
     });
     return this.saveAndCompute(log);
+  }
+
+  async activeEffectChanged(type, effect, changed = {}) {
+    if (!getSetting(SETTINGS.TRACK_ACTIVE_EFFECTS, true)) return null;
+    const actor = actorForActiveEffect(effect);
+    const matchingLogs = actor ? this.findLogsForActor(actor) : Array.from(this.activeLogs.values());
+    if (!matchingLogs.length) return null;
+    for (const log of matchingLogs) {
+      const combat = this.findCombatForLog(log);
+      const participant = actor ? log.participants.find((entry) => entry.actorUuid === actor.uuid || entry.actorId === actor.id) : null;
+      new CombatEventLedger(log).append({
+        type,
+        round: combat?.round ?? null,
+        turn: combat?.turn ?? null,
+        combatantId: participant?.combatantId ?? "",
+        actorUuid: participant?.actorUuid ?? actor?.uuid ?? "",
+        tokenUuid: participant?.tokenUuid ?? "",
+        source: { kind: SOURCE_KINDS.ACTIVE_EFFECT_UPDATE, id: effect?.id ?? effect?.uuid ?? "" },
+        confidence: CONFIDENCE.PROBABLE,
+        data: {
+          effectId: effect?.id ?? "",
+          effectUuid: effect?.uuid ?? "",
+          name: effect?.name ?? effect?.label ?? "",
+          icon: effect?.img ?? effect?._source?.img ?? effect?._source?.icon ?? "",
+          disabled: Boolean(effect?.disabled),
+          changes: changed ?? {}
+        }
+      });
+      await this.saveAndCompute(log);
+    }
+    return matchingLogs;
   }
 
   async chatMessageCreated(message) {
@@ -421,6 +461,7 @@ export class CombatLogService {
       includeUnclearDeltasInStats: getSetting(SETTINGS.INCLUDE_UNCLEAR_DELTAS_IN_STATS, false),
       defaultDprMethod: getSetting(SETTINGS.DEFAULT_DPR_METHOD, "appliedNet")
     });
+    if (log?.combatId && this.activeLogs.get(log.combatId)?.id === log.id) this.activeLogs.set(log.combatId, log);
     await this.persistence.saveLog(log);
     globalThis.Hooks?.callAll?.(HOOKS.LOG_UPDATED, log);
     debugLog("Saved combat log", log.id, log.status, log.events.length);
@@ -430,10 +471,33 @@ export class CombatLogService {
   listActiveLogs() {
     return Array.from(this.activeLogs.values());
   }
+
+  async deleteLog(logId) {
+    if (!logId) return false;
+    for (const [combatId, log] of this.activeLogs.entries()) {
+      if (log.id === logId) this.activeLogs.delete(combatId);
+    }
+    const deleted = await this.persistence.deleteLog(logId);
+    if (deleted) globalThis.Hooks?.callAll?.(HOOKS.LOG_UPDATED, { id: logId, deleted: true });
+    return deleted;
+  }
 }
 
 function actorDataSnapshot(actor) {
   return cloneData(actor?.toObject?.() ?? actor?._source ?? actor ?? {});
+}
+
+function actorForActiveEffect(effect) {
+  const candidates = [
+    effect?.actor,
+    effect?.parent,
+    effect?.parent?.actor,
+    effect?.parent?.parent,
+    effect?.document?.parent,
+    effect?.document?.parent?.actor,
+    effect?.document?.parent?.parent
+  ];
+  return candidates.find((candidate) => candidate?.documentName === "Actor" || candidate?.uuid?.startsWith?.("Actor.")) ?? null;
 }
 
 function normalizeName(value) {

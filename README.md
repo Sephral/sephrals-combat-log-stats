@@ -17,12 +17,12 @@ Questions, feedback, and module support are welcome on [Discord](https://discord
 - Mark uncertain data as uncertain instead of silently treating guesses as facts.
 - Keep all logs GM-only by default and require explicit sharing choices.
 
-## MVP Scope
+## Features
 
-Version 0.1 establishes the architecture and first usable tracker:
+Version 0.1.0 provides:
 
 - Combat start, update, deletion, resume, combatant, chat, roll, actor-resource, token, and template hooks.
-- Persistent CombatLog index in a world setting and large log payloads prepared for world-data JSON files.
+- Persistent world-data JSON store for all CombatLogs, with a compact world-setting index for discovery and fallback metadata.
 - Session segments for combat start and resume after reload.
 - Active combat resume and orphan handling on Foundry ready.
 - Generic and D&D5e system adapters with conservative roll/resource classification.
@@ -32,15 +32,16 @@ Version 0.1 establishes the architecture and first usable tracker:
 - Actor HP/resource deltas that merely confirm an already extracted chat application are stored as evidence but not counted a second time.
 - Offline resource delta detection with `unclear` confidence.
 - Stats and DPR computation from ledger events.
-- Open Combat Log windows update live while a combat is running, so the GM can watch Summary, DPR, Timeline, and History values during play.
+- Open Combat Log windows update live while a combat is running, so the GM can watch Summary, Impact Meter, Round Log, and History values during play.
 - Combat history overview for browsing stored past combats, opening old logs, and comparing status, rounds, participants, net damage, and party DPR.
 - Corrections tab for unclassified/unclear deltas and manual classification.
 - Manual GM adjustments for adding or reducing damage/healing as explicit ledger events, including an audit history with ignore/restore controls.
 - The Corrections view no longer presents a manual entry form; it only shows unresolved data that could not be derived from chat or resource changes.
 - Lifecycle events are tracked as safe combat facts and are not shown as correction candidates.
 - Participant attribution ignores empty actor UUIDs so side-based DPR stays stable for tokens or simulated combatants without actor UUIDs.
-- DPR Meter, Summary, Timeline, Participants, Sharing, Raw Events, and Export sections.
-- JSON and Markdown export.
+- Impact Meter, Summary, Round Log, Statistics, Corrections, Participants, History, and Sharing sections.
+- Sortable Impact Meter columns for combatant, side, damage, healing, discipline counts, control, downed moments, and Net DPR.
+- JSON and Markdown export from Sharing.
 
 ## Core Model
 
@@ -56,23 +57,31 @@ A CombatLog stores:
 
 Statistics are computed from ledger events. Damage rolls alone do not imply applied damage. Resource deltas alone do not imply a safe source or target. Corrections and manual classifications are explicit ledger facts.
 
-Legacy manual GM adjustments are stored as explicit ledger events. They do not edit historical rolls or resource deltas; they add a traceable correction event that is included in recomputed net totals. Player reports keep these GM-only correction events hidden unless GM notes and correction sharing are both explicitly enabled. New combat data is expected to come from chat messages, roll metadata, and actor resource changes rather than GM-entered adjustments.
+Manual GM adjustments are stored as explicit ledger events. They do not edit historical rolls or resource deltas; they add a traceable correction event that is included in recomputed net totals. Player reports keep GM-only correction events and GM-only markers hidden. New combat data is expected to come from chat messages, roll metadata, and actor resource changes rather than GM-entered adjustments.
 
-## Persistence
+## How Data Is Stored
 
-The module stores a compact index in the world setting `sephrals-combat-log-stats.combatLogIndex`.
+SCLS stores combat data inside the active Foundry world. Combat logs are not written into actors, items, scenes, chat messages, or compendia.
+
+The primary storage location is one world-data JSON file that is updated whenever a combat log changes:
+
+```text
+worlds/<world-id>/data/sephrals-combat-log-stats/combat-logs.json
+```
+
+That file contains the full stored `CombatLog` payloads: combat metadata, session segments, participants, resource snapshots, ledger events, manual corrections, report settings, and recomputable statistics.
+
+The world setting `sephrals-combat-log-stats.combatLogIndex` is kept as a compact discovery index and fallback metadata store. It lets the History tab find past combats quickly and keeps enough metadata to show rows such as title, status, start/end time, rounds, participants, net damage, and party DPR. It is not the primary payload store when the JSON file can be written.
 
 The History tab is built from that index and enriches rows from stored log payloads when available, so past combats remain discoverable even after a reload.
 
-Large CombatLog payloads are designed to be written as JSON under world data:
+If the current Foundry environment does not expose persistent file upload helpers to the client, SCLS falls back to storing full log payloads inline in the world-setting index so reloads still keep the data.
 
-```text
-worlds/<world-id>/data/sephrals-combat-log-stats/combat-logs/<combatLogId>.json
-```
+Generated player reports are separate Foundry content: posting a report creates a normal chat message, and creating a journal report creates a normal journal entry. These reports contain only the filtered report output selected by the GM; they do not expose the internal ledger or GM-only events.
 
-If the current Foundry environment does not expose persistent file upload helpers to the client, logs remain available in memory and indexed metadata is still maintained. The implementation keeps this path isolated so a server-side helper or later Foundry API can be added without changing the ledger model.
+Deleting a combat log from SCLS removes it from the central store and index. It does not delete chat messages or journal entries that were previously generated from that combat.
 
-## DPR
+## Impact Meter
 
 Default DPR is Applied Net DPR:
 
@@ -80,25 +89,12 @@ Default DPR is Applied Net DPR:
 netDamageApplied / combatRounds
 ```
 
-The module also tracks rolled damage, gross applied damage, correction impact, party DPR, enemy DPR, side DPR, and per-combatant DPR. Unclear deltas are excluded from default DPR unless the GM classifies them or enables unclear-delta inclusion.
+The module also tracks rolled damage, gross applied damage, correction impact, party DPR, enemy DPR, side DPR, and per-combatant DPR. Unclear deltas are excluded from default DPR unless the GM classifies them or enables unclear-delta inclusion. The Impact Meter table can be sorted by each visible column.
 
 ## Sharing
 
-Sharing is always opt-in per CombatLog. Players never receive raw events, GM notes, private rolls, hidden combatant data, or correction controls unless the GM explicitly allows the relevant report data.
+Sharing is controlled through report settings per CombatLog. The GM selects which report sections should be included, then can post the filtered player report to chat, create a journal report, or export JSON/Markdown. The report is derived from the computed ledger statistics and never exposes raw events, GM notes, private rolls, hidden combatant data, or correction controls.
 
-Default sharing mode is GM-only.
-
-When sharing is enabled, the GM can post a filtered player report to chat or create a journal report. The player report is derived from the computed ledger statistics and respects the CombatLog sharing settings: hostile names can be anonymized, enemy stats can stay hidden, private rolls and GM notes are excluded by default, and unclear events are only included when explicitly allowed.
+Available report sections include Combat Recap, Party Contributions, Blades/Bows/Close Calls, Spellwork, Healing and Support, Control Plays, Close Calls, Damage Spotlight, Hero Moments, Enemy Pressure, Tactical Turning Points, Support and Saves, and Aftermath.
 
 If `autoPostPlayerSummaryOnEnd` or `autoExportJournalOnEnd` is enabled, the module only runs those actions for CombatLogs that are already explicitly shared.
-
-## Validation
-
-From this module directory:
-
-```powershell
-npm run check
-npm test
-npm run check:manifest
-npm run release:prepare
-```

@@ -120,6 +120,10 @@ function registerHooks() {
     void combatLogService.actorUpdated(actor, changed, options, userId);
   });
 
+  Hooks.on("createActiveEffect", (effect) => trackActiveEffect(EVENT_TYPES.ACTIVE_EFFECT_CREATED, effect, {}));
+  Hooks.on("updateActiveEffect", (effect, changed) => trackActiveEffect(EVENT_TYPES.ACTIVE_EFFECT_UPDATED, effect, changed));
+  Hooks.on("deleteActiveEffect", (effect) => trackActiveEffect(EVENT_TYPES.ACTIVE_EFFECT_DELETED, effect, {}));
+
   Hooks.on("createMeasuredTemplate", (template) => trackTemplate(EVENT_TYPES.TEMPLATE_CREATED, template));
   Hooks.on("deleteMeasuredTemplate", (template) => trackTemplate(EVENT_TYPES.TEMPLATE_DELETED, template));
   Hooks.on("updateToken", (token, changed) => trackToken(EVENT_TYPES.TOKEN_UPDATED, token, changed));
@@ -146,6 +150,11 @@ function registerHooks() {
   });
 
   Hooks.on("renderCombatTracker", injectCombatTrackerButton);
+}
+
+function trackActiveEffect(type, effect, changed = {}) {
+  if (!isGM()) return;
+  void combatLogService.activeEffectChanged(type, effect, changed);
 }
 
 function trackTemplate(type, template) {

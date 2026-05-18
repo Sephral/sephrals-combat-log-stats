@@ -6,11 +6,22 @@
   </section>
   {{/unless}}
 
-  {{#if tabs.length}}
+  {{#if tabNavigation.hasTabs}}
   <nav class="scls-tabs">
-    {{#each tabs}}
-    <button type="button" class="{{#if this.active}}is-active{{/if}}" data-action="switchTab" data-tab="{{this.id}}">{{this.label}}</button>
-    {{/each}}
+    <div class="scls-tab-group scls-tab-group--history">
+      <button type="button" class="{{#if tabNavigation.historyTab.active}}is-active{{/if}}" data-action="switchTab" data-tab="{{tabNavigation.historyTab.id}}"><i class="{{tabNavigation.historyTab.icon}}" aria-hidden="true"></i><span>{{tabNavigation.historyTab.label}}</span></button>
+    </div>
+    {{#if tabNavigation.showConnector}}
+    <div class="scls-tab-connector" aria-hidden="true">
+      <span>{{tabNavigation.connectorLabel}}</span>
+      <strong>{{tabNavigation.connectorArrow}}</strong>
+    </div>
+    <div class="scls-tab-group scls-tab-group--details">
+      {{#each tabNavigation.detailTabs}}
+      <button type="button" class="{{#if this.active}}is-active{{/if}}" data-action="switchTab" data-tab="{{this.id}}"><i class="{{this.icon}}" aria-hidden="true"></i><span>{{this.label}}</span></button>
+      {{/each}}
+    </div>
+    {{/if}}
   </nav>
   {{/if}}
 
@@ -31,7 +42,12 @@
             <td>{{this.participantCount}}</td>
             <td>{{this.netDamageApplied}}</td>
             <td>{{this.partyDPR}}</td>
-            <td><button type="button" data-action="openLog" data-log-id="{{this.combatLogId}}">{{sclsLocalize "SCLS.Button.Open"}}</button></td>
+            <td>
+              <div class="scls-history-actions">
+                <button type="button" data-action="openLog" data-log-id="{{this.combatLogId}}"><i class="fa-solid fa-folder-open" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Select"}}</span></button>
+                <button type="button" class="scls-button--danger" data-action="deleteLog" data-log-id="{{this.combatLogId}}" data-log-title="{{this.title}}"><i class="fa-solid fa-trash" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Delete"}}</span></button>
+              </div>
+            </td>
           </tr>
           {{/each}}
         </tbody>
@@ -44,7 +60,13 @@
   {{#if hasLog}}
   <header class="scls-header" data-detail-only>
     <div class="scls-title-block">
-      <h2>{{log.title}}</h2>
+      <form class="scls-title-form">
+        <label>
+          <span>{{sclsLocalize "SCLS.Label.CombatName"}}</span>
+          <input type="text" name="title" value="{{log.title}}">
+        </label>
+        <button type="button" data-action="renameLog"><i class="fa-solid fa-pen" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.RenameCombat"}}</span></button>
+      </form>
       <div class="scls-meta-line"><span>{{summary.status}}</span><span>{{summary.rounds}} {{sclsLocalize "SCLS.Label.Rounds"}}</span><span>{{summary.sessionCount}} {{sclsLocalize "SCLS.Label.Sessions"}}</span></div>
     </div>
     <div class="scls-header__stats scls-header__stats--damage">
@@ -74,6 +96,19 @@
         {{#each computed.warnings}}<p>{{this}}</p>{{/each}}
       </div>
       {{/if}}
+      <h4>{{sclsLocalize "SCLS.Metrics.Contributions"}}</h4>
+      <div class="scls-metrics-list">
+        {{#each combatMetrics.contributionRows}}
+        <div class="scls-metrics-row">
+          <span class="scls-combatant-cell"><img class="scls-avatar--tiny" src="{{this.img}}" alt="">{{this.name}}</span>
+          <div class="scls-metrics-bars">
+            <span class="scls-meter scls-meter--damage" style="--scls-bar: {{this.damagePercent}}%"><i></i></span>
+            <span class="scls-meter scls-meter--healing" style="--scls-bar: {{this.healingPercent}}%"><i></i></span>
+          </div>
+          <strong>{{this.impact}}</strong>
+        </div>
+        {{/each}}
+      </div>
     </section>
 
     <section class="scls-panel" data-panel="dpr">
@@ -85,10 +120,10 @@
         <div class="scls-metric"><span>{{sclsLocalize "SCLS.Label.UnknownDPR"}}</span><strong>{{computed.dpr.unknownDPR}}</strong></div>
       </div>
       <table class="scls-table">
-        <thead><tr><th>{{sclsLocalize "SCLS.Label.Combatant"}}</th><th>{{sclsLocalize "SCLS.Label.Side"}}</th><th>{{sclsLocalize "SCLS.Label.DamageRolled"}}</th><th>{{sclsLocalize "SCLS.Label.GrossApplied"}}</th><th>{{sclsLocalize "SCLS.Label.Corrections"}}</th><th>{{sclsLocalize "SCLS.Label.NetDamage"}}</th><th>{{sclsLocalize "SCLS.Label.NetDPR"}}</th><th>{{sclsLocalize "SCLS.Label.Confidence"}}</th></tr></thead>
+        <thead><tr>{{#each dprColumns}}<th><button type="button" class="scls-sort-button {{#if this.active}}is-active{{/if}}" data-action="sortDpr" data-sort-key="{{this.key}}"><span>{{this.label}}</span><i class="{{this.icon}}" aria-hidden="true"></i></button></th>{{/each}}</tr></thead>
         <tbody>
           {{#each dprRows}}
-          <tr><td>{{this.name}}</td><td>{{this.side}}</td><td>{{this.damageRolled}}</td><td>{{this.damageAppliedGross}}</td><td>+{{this.damageCorrectionsUp}} / -{{this.damageCorrectionsDown}}</td><td>{{this.damageAppliedNet}}</td><td>{{this.netDPR}}</td><td>{{this.unclearEvents}} unclear</td></tr>
+          <tr><td><span class="scls-combatant-cell"><img class="scls-avatar--tiny" src="{{this.img}}" alt="">{{this.name}}</span></td><td>{{this.side}}</td><td>{{this.damageAppliedNet}}</td><td>{{this.healing}}</td><td>{{this.martial}}</td><td>{{this.ranged}}</td><td>{{this.magic}}</td><td>{{this.control}}</td><td>{{this.downed}}</td><td>{{this.netDPR}}</td></tr>
           {{/each}}
         </tbody>
       </table>
@@ -111,9 +146,9 @@
             <td>{{this.note}}</td>
             <td>
               {{#if this.ignored}}
-              <button type="button" data-action="restoreEvent" data-event-id="{{this.id}}">{{sclsLocalize "SCLS.Button.Restore"}}</button>
+              <button type="button" data-action="restoreEvent" data-event-id="{{this.id}}"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Restore"}}</span></button>
               {{else}}
-              <button type="button" data-action="ignoreEvent" data-event-id="{{this.id}}">{{sclsLocalize "SCLS.Button.Ignore"}}</button>
+              <button type="button" data-action="ignoreEvent" data-event-id="{{this.id}}"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Ignore"}}</span></button>
               {{/if}}
             </td>
           </tr>
@@ -130,7 +165,7 @@
             <td>{{this.type}}</td>
             <td>{{this.data.oldValue}} → {{this.data.newValue}} ({{this.data.delta}})</td>
             <td>
-              <select data-action="classify" data-event-id="{{this.id}}">
+              <select data-scls-action="classify" data-event-id="{{this.id}}">
                 {{#each this.interpretationOptions}}
                 <option value="{{this.value}}" {{#if this.selected}}selected{{/if}}>{{this.label}}</option>
                 {{/each}}
@@ -139,9 +174,9 @@
             <td>{{this.confidence}}</td>
             <td>
               {{#if this.ignored}}
-              <button type="button" data-action="restoreEvent" data-event-id="{{this.id}}">{{sclsLocalize "SCLS.Button.Restore"}}</button>
+              <button type="button" data-action="restoreEvent" data-event-id="{{this.id}}"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Restore"}}</span></button>
               {{else}}
-              <button type="button" data-action="ignoreEvent" data-event-id="{{this.id}}">{{sclsLocalize "SCLS.Button.Ignore"}}</button>
+              <button type="button" data-action="ignoreEvent" data-event-id="{{this.id}}"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Ignore"}}</span></button>
               {{/if}}
             </td>
           </tr>
@@ -160,8 +195,8 @@
         <tbody>
           {{#each participants}}
           <tr>
-            <td><img src="{{this.img}}" alt=""> {{this.name}}</td>
-            <td><select data-action="setSide" data-combatant-id="{{this.combatantId}}">{{#each this.sideOptions}}<option value="{{this.value}}" {{#if this.selected}}selected{{/if}}>{{this.label}}</option>{{/each}}</select></td>
+            <td><span class="scls-combatant-cell"><img src="{{this.img}}" alt="">{{this.name}}</span></td>
+            <td><select data-scls-action="setSide" data-combatant-id="{{this.combatantId}}">{{#each this.sideOptions}}<option value="{{this.value}}" {{#if this.selected}}selected{{/if}}>{{this.label}}</option>{{/each}}</select></td>
             <td>{{this.initiative}}</td>
             <td>{{this.stats.damageAppliedNet}}</td>
             <td>{{this.stats.netDPR}}</td>
@@ -173,15 +208,69 @@
 
     <section class="scls-panel" data-panel="timeline">
       <h3>{{sclsLocalize "SCLS.Tab.timeline"}}</h3>
-      <ol class="scls-timeline">
-        {{#each timelineEvents}}
-        <li><span>{{this.createdLabel}}</span><strong>{{this.label}}</strong><em>{{this.confidence}}</em></li>
+      <ol class="scls-round-log">
+        {{#each combatRounds}}
+        <li>
+          <details class="scls-round" {{#if this.open}}open{{/if}}>
+            <summary>
+              <strong>{{sclsLocalize "SCLS.Label.Round"}} {{this.round}}</strong>
+              <span>{{this.summary}}</span>
+            </summary>
+            {{#if this.hasActions}}
+            <table class="scls-round-table">
+              <thead><tr><th>{{sclsLocalize "SCLS.Label.Actor"}}</th><th>{{sclsLocalize "SCLS.Label.Action"}}</th><th>{{sclsLocalize "SCLS.Label.Target"}}</th><th>{{sclsLocalize "SCLS.Label.Amount"}}</th><th>{{sclsLocalize "SCLS.Label.Confidence"}}</th></tr></thead>
+              <tbody>
+                {{#each this.actions}}
+                <tr class="scls-action--{{this.kind}} scls-side--{{this.side}}"><td>{{this.actor}}</td><td><strong>{{this.verb}}</strong>{{#if this.detail}}<span>{{this.detail}}</span>{{/if}}</td><td>{{this.target}}</td><td>{{this.amountLabel}}</td><td>{{this.confidence}}</td></tr>
+                {{/each}}
+              </tbody>
+            </table>
+            {{else}}
+            <p class="scls-muted">{{sclsLocalize "SCLS.Protocol.NoActions"}}</p>
+            {{/if}}
+          </details>
+        </li>
         {{/each}}
       </ol>
     </section>
 
     <section class="scls-panel" data-panel="statistics">
       <h3>{{sclsLocalize "SCLS.Tab.statistics"}}</h3>
+      <div class="scls-metrics-layout">
+        <section class="scls-metrics-block">
+          <h4>{{sclsLocalize "SCLS.Metrics.DisciplineMix"}}</h4>
+          <div class="scls-discipline-grid">
+            {{#each combatMetrics.disciplineRows}}
+            <div class="scls-discipline scls-discipline--{{this.tone}}">
+              <span>{{this.label}}</span>
+              <strong>{{this.value}}</strong>
+              <i style="--scls-bar: {{this.percent}}%"></i>
+            </div>
+            {{/each}}
+          </div>
+        </section>
+        <section class="scls-metrics-block">
+          <h4>{{sclsLocalize "SCLS.Metrics.Pressure"}}</h4>
+          <div class="scls-metrics-list">
+            {{#each combatMetrics.pressureRows}}
+            <div class="scls-metrics-row scls-metrics-row--compact">
+              <span>{{this.label}}</span>
+              <span class="scls-meter" style="--scls-bar: {{this.pressurePercent}}%"><i></i></span>
+              <strong>{{this.damageAppliedNet}} / {{this.netDPR}}</strong>
+            </div>
+            {{/each}}
+          </div>
+        </section>
+      </div>
+      <h4>{{sclsLocalize "SCLS.Metrics.TopActions"}}</h4>
+      <table class="scls-table">
+        <thead><tr><th>{{sclsLocalize "SCLS.Label.Action"}}</th><th>{{sclsLocalize "SCLS.Metrics.Kind"}}</th><th>{{sclsLocalize "SCLS.Metrics.Users"}}</th><th>{{sclsLocalize "SCLS.Metrics.Uses"}}</th><th>{{sclsLocalize "SCLS.Label.Amount"}}</th><th>{{sclsLocalize "SCLS.Metrics.Average"}}</th></tr></thead>
+        <tbody>
+          {{#each combatMetrics.topActions}}
+          <tr><td><strong>{{this.name}}</strong></td><td>{{this.kind}}</td><td>{{this.actors}}</td><td>{{this.uses}}</td><td>{{this.amount}}</td><td>{{this.average}}</td></tr>
+          {{/each}}
+        </tbody>
+      </table>
       <table class="scls-table">
         <thead><tr><th>{{sclsLocalize "SCLS.Label.Side"}}</th><th>{{sclsLocalize "SCLS.Label.DamageRolled"}}</th><th>{{sclsLocalize "SCLS.Label.GrossApplied"}}</th><th>{{sclsLocalize "SCLS.Label.NetDamage"}}</th><th>{{sclsLocalize "SCLS.Label.NetDPR"}}</th></tr></thead>
         <tbody>
@@ -195,33 +284,21 @@
     <section class="scls-panel" data-panel="sharing">
       <h3>{{sclsLocalize "SCLS.Tab.sharing"}}</h3>
       <form class="scls-share-form">
-        <label><input type="checkbox" name="isShared" {{#if log.shareSettings.isShared}}checked{{/if}}> {{sclsLocalize "SCLS.Share.Enable"}}</label>
-        <label>{{sclsLocalize "SCLS.Share.Mode"}} <select name="shareMode">{{#each shareModes}}<option value="{{this.value}}" {{#if this.selected}}selected{{/if}}>{{this.label}}</option>{{/each}}</select></label>
-        <label><input type="checkbox" name="includePartyStats" {{#if log.shareSettings.includePartyStats}}checked{{/if}}> {{sclsLocalize "SCLS.Share.PartyStats"}}</label>
-        <label><input type="checkbox" name="includeEnemyStats" {{#if log.shareSettings.includeEnemyStats}}checked{{/if}}> {{sclsLocalize "SCLS.Share.EnemyStats"}}</label>
-        <label><input type="checkbox" name="includeDPR" {{#if log.shareSettings.includeDPR}}checked{{/if}}> {{sclsLocalize "SCLS.Share.DPR"}}</label>
-        <label><input type="checkbox" name="includeTimeline" {{#if log.shareSettings.includeTimeline}}checked{{/if}}> {{sclsLocalize "SCLS.Share.Timeline"}}</label>
-        <label><input type="checkbox" name="includeCorrections" {{#if log.shareSettings.includeCorrections}}checked{{/if}}> {{sclsLocalize "SCLS.Share.Corrections"}}</label>
-        <label><input type="checkbox" name="includePrivateRolls" {{#if log.shareSettings.includePrivateRolls}}checked{{/if}}> {{sclsLocalize "SCLS.Share.PrivateRolls"}}</label>
-        <label><input type="checkbox" name="includeGMNotes" {{#if log.shareSettings.includeGMNotes}}checked{{/if}}> {{sclsLocalize "SCLS.Share.GMNotes"}}</label>
-        <label><input type="checkbox" name="includeUnclearEvents" {{#if log.shareSettings.includeUnclearEvents}}checked{{/if}}> {{sclsLocalize "SCLS.Share.Unclear"}}</label>
-        <label><input type="checkbox" name="anonymizeEnemies" {{#if log.shareSettings.anonymizeEnemies}}checked{{/if}}> {{sclsLocalize "SCLS.Share.Anonymize"}}</label>
-        <label><input type="checkbox" name="allowPlayersToOpenReport" {{#if log.shareSettings.allowPlayersToOpenReport}}checked{{/if}}> {{sclsLocalize "SCLS.Share.PlayerOpen"}}</label>
-        <button type="button" data-action="toggleSharing">{{sclsLocalize "SCLS.Button.SaveSharing"}}</button>
-        <button type="button" data-action="postPlayerReport" {{#unless canShareReport}}disabled{{/unless}}>{{sclsLocalize "SCLS.Button.PostPlayerReport"}}</button>
-        <button type="button" data-action="createJournalReport" {{#unless canShareReport}}disabled{{/unless}}>{{sclsLocalize "SCLS.Button.CreateJournalReport"}}</button>
+        <fieldset class="scls-report-sections">
+          <legend>{{sclsLocalize "SCLS.Share.ReportSections"}}</legend>
+          {{#each reportSectionOptions}}
+          <label><input type="checkbox" name="reportSections" value="{{this.value}}" {{#if this.selected}}checked{{/if}}> {{this.label}}</label>
+          {{/each}}
+        </fieldset>
+        <button type="button" data-action="toggleSharing"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.SaveSharing"}}</span></button>
+        <button type="button" data-action="postPlayerReport" {{#unless canShareReport}}disabled{{/unless}}><i class="fa-solid fa-message" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.PostPlayerReport"}}</span></button>
+        <button type="button" data-action="createJournalReport" {{#unless canShareReport}}disabled{{/unless}}><i class="fa-solid fa-book-open" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.CreateJournalReport"}}</span></button>
       </form>
-    </section>
-
-    <section class="scls-panel" data-panel="raw">
-      <h3>{{sclsLocalize "SCLS.Tab.raw"}}</h3>
-      <details><summary>{{rawEvents.length}} {{sclsLocalize "SCLS.Label.RawEvents"}}</summary><pre>{{sclsJson rawEvents}}</pre></details>
-    </section>
-
-    <section class="scls-panel" data-panel="export">
-      <h3>{{sclsLocalize "SCLS.Tab.export"}}</h3>
-      <button type="button" data-action="exportJson">{{sclsLocalize "SCLS.Button.ExportJson"}}</button>
-      <button type="button" data-action="exportMarkdown">{{sclsLocalize "SCLS.Button.ExportMarkdown"}}</button>
+      <h4>{{sclsLocalize "SCLS.Label.Export"}}</h4>
+      <div class="scls-share-actions">
+      <button type="button" data-action="exportJson"><i class="fa-solid fa-file-code" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.ExportJson"}}</span></button>
+      <button type="button" data-action="exportMarkdown"><i class="fa-brands fa-markdown" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.ExportMarkdown"}}</span></button>
+      </div>
     </section>
   {{/if}}
   </main>

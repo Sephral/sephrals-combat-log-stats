@@ -8,10 +8,8 @@ export const HOOKS = Object.freeze({
 
 export const SETTINGS = Object.freeze({
   INDEX: "combatLogIndex",
-  WINDOW_GEOMETRY: "windowGeometry",
   ENABLE_AUTO_TRACKING: "enableAutoTracking",
   SHOW_SUMMARY_ON_COMBAT_END: "showSummaryOnCombatEnd",
-  PERSIST_LOGS_TO_FILES: "persistLogsToFiles",
   AUTO_RESUME_ACTIVE_COMBATS: "autoResumeActiveCombats",
   TRACK_CHAT_MESSAGES: "trackChatMessages",
   TRACK_ROLLS: "trackRolls",
@@ -20,11 +18,8 @@ export const SETTINGS = Object.freeze({
   TRACK_TEMPLATES: "trackTemplates",
   TRACK_TOKEN_UPDATES: "trackTokenUpdates",
   RESOURCE_DELTA_WINDOW_MS: "resourceDeltaWindowMs",
-  AUTO_CLASSIFY_CORRECTIONS: "autoClassifyCorrections",
   INCLUDE_UNCLEAR_DELTAS_IN_STATS: "includeUnclearDeltasInStats",
   DEFAULT_DPR_METHOD: "defaultDprMethod",
-  USE_ACTIVE_ROUNDS_FOR_COMBATANT_DPR: "useActiveRoundsForCombatantDpr",
-  SHOW_DPR_METER: "showDprMeter",
   ENABLE_PLAYER_SHARING: "enablePlayerSharing",
   DEFAULT_SHARE_MODE: "defaultShareMode",
   DEFAULT_ANONYMIZE_ENEMIES: "defaultAnonymizeEnemies",
@@ -111,6 +106,9 @@ export const EVENT_TYPES = Object.freeze({
   ROLL_OTHER: "roll.other",
   RESOURCE_DELTA: "resource.delta",
   RESOURCE_DELTA_OFFLINE: "resource.delta.offlineDetected",
+  ACTIVE_EFFECT_CREATED: "activeEffect.created",
+  ACTIVE_EFFECT_UPDATED: "activeEffect.updated",
+  ACTIVE_EFFECT_DELETED: "activeEffect.deleted",
   DAMAGE_APPLIED: "damage.applied",
   DAMAGE_CORRECTED_UP: "damage.correctedUp",
   DAMAGE_CORRECTED_DOWN: "damage.correctedDown",
@@ -168,7 +166,7 @@ export const SHARE_MODES = Object.freeze({
   PUBLIC_REPORT: "publicReport"
 });
 
-export const TABS = Object.freeze(["history", "summary", "timeline", "statistics", "dpr", "corrections", "participants", "sharing", "raw", "export"]);
+export const TABS = Object.freeze(["history", "summary", "timeline", "statistics", "dpr", "corrections", "participants", "sharing"]);
 
 export const DEFAULT_RESOURCE_PATHS = Object.freeze({
   generic: ["system.attributes.hp.value", "system.attributes.hp.temp", "system.attributes.hp.tempmax", "system.attributes.hp.max"],
