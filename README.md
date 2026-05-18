@@ -1,6 +1,6 @@
 # Sephral’s Combat Log & Stats
 
-Sephral’s Combat Log & Stats tracks Foundry combats as a persistent event ledger and computes honest combat statistics, DPR, corrections, and player-safe reports from that ledger.
+Sephral’s Combat Log & Stats helps GMs understand what really happened in combat and turn that into readable reports for the table. Instead of guessing after the fight, SCLS keeps a running combat log, builds summaries and performance views from it, and lets the GM share only the parts players should see.
 
 ## Discord
 
@@ -8,56 +8,37 @@ Sephral’s Combat Log & Stats tracks Foundry combats as a persistent event ledg
 
 Questions, feedback, and module support are welcome on [Discord](https://discord.gg/7BjCgDYaBP).
 
-## Design Goals
+## Why GMs Use It
 
-- Extend Foundry combat workflows without replacing combat automation or enforcing rules.
-- Track what happened between combat start, interruptions, resumes, and combat end.
-- Treat the combat log as an event ledger, not a post-hoc estimate.
-- Separate rolled damage, applied resource deltas, corrections, and net results.
-- Mark uncertain data as uncertain instead of silently treating guesses as facts.
-- Keep all logs GM-only by default and require explicit sharing choices.
+- Keep a live record of what happened during a fight instead of reconstructing it afterward.
+- See combat performance from multiple angles: summary, round flow, impact, participant stats, and corrections.
+- Review older combats later and compare how fights played out.
+- Share readable reports with players without exposing GM-only details.
+- Catch uncertain or incomplete data instead of silently treating guesses as facts.
+
+## What Players Get
+
+- Clean combat recaps instead of raw event spam.
+- Optional report sections such as party contributions, close calls, hero moments, enemy pressure, and aftermath.
+- Chat posts or journal reports that are filtered for player-safe visibility.
 
 ## Features
 
-Version 0.1.0 provides:
+Version 0.1.0 includes:
 
-- Combat start, update, deletion, resume, combatant, chat, roll, actor-resource, token, and template hooks.
-- Persistent world-data JSON store for all CombatLogs, with a compact world-setting index for discovery and fallback metadata.
-- Session segments for combat start and resume after reload.
-- Active combat resume and orphan handling on Foundry ready.
-- Generic and D&D5e system adapters with conservative roll/resource classification.
-- Chat-derived source, target, damage, and healing extraction for automatic combat statistics without GM-entered adjustments during normal play.
-- Real token combatants are matched by speaker token, actor, and combatant identifiers so chat events stay attached to the correct active combat even when Foundry has no global combat selected.
-- HP/resource delta tracking for configurable resource paths.
-- Actor HP/resource deltas that merely confirm an already extracted chat application are stored as evidence but not counted a second time.
-- Offline resource delta detection with `unclear` confidence.
-- Stats and DPR computation from ledger events.
-- Open Combat Log windows update live while a combat is running, so the GM can watch Summary, Impact Meter, Round Log, and History values during play.
-- Combat history overview for browsing stored past combats, opening old logs, and comparing status, rounds, participants, net damage, and party DPR.
-- Corrections tab for unclassified/unclear deltas and manual classification.
-- Manual GM adjustments for adding or reducing damage/healing as explicit ledger events, including an audit history with ignore/restore controls.
-- The Corrections view no longer presents a manual entry form; it only shows unresolved data that could not be derived from chat or resource changes.
-- Lifecycle events are tracked as safe combat facts and are not shown as correction candidates.
-- Participant attribution ignores empty actor UUIDs so side-based DPR stays stable for tokens or simulated combatants without actor UUIDs.
-- Impact Meter, Summary, Round Log, Statistics, Corrections, Participants, History, and Sharing sections.
-- Sortable Impact Meter columns for combatant, side, damage, healing, discipline counts, control, downed moments, and Net DPR.
-- JSON and Markdown export from Sharing.
+- Automatic combat logging while a GM runs combat.
+- Live windows for Summary, Impact Meter, Round Log, Statistics, Corrections, Participants, History, and Sharing.
+- Sortable combat-performance tables for damage, healing, control, downed moments, and Net DPR.
+- Combat history for reopening earlier fights and reviewing key numbers.
+- Corrections tools for unclear data and manual GM adjustments with an audit trail.
+- Player report sharing with selectable sections and chat/journal export.
+- JSON and Markdown export for external use.
 
-## Core Model
+## What SCLS Tracks
 
-A CombatLog stores:
+SCLS follows the flow of combat across start, progress, interruptions, reloads, resumes, and combat end. It watches the kinds of information that matter for post-fight review: who acted, who took damage, who was healed, when control effects landed, when someone dropped, and where data is still unclear.
 
-- durable combat metadata and status
-- session segments
-- stable participant references and fallback names/images
-- initial and latest resource snapshots
-- an append-only event ledger
-- manual overrides and share settings
-- recomputable statistics
-
-Statistics are computed from ledger events. Damage rolls alone do not imply applied damage. Resource deltas alone do not imply a safe source or target. Corrections and manual classifications are explicit ledger facts.
-
-Manual GM adjustments are stored as explicit ledger events. They do not edit historical rolls or resource deltas; they add a traceable correction event that is included in recomputed net totals. Player reports keep GM-only correction events and GM-only markers hidden. New combat data is expected to come from chat messages, roll metadata, and actor resource changes rather than GM-entered adjustments.
+The goal is not to replace your system automation. The goal is to give the GM a trustworthy combat record and useful presentation layers on top of it.
 
 ## How Data Is Stored
 
@@ -69,31 +50,23 @@ The primary storage location is one world-data JSON file that is updated wheneve
 worlds/<world-id>/data/sephrals-combat-log-stats/combat-logs.json
 ```
 
-That file contains the full stored `CombatLog` payloads: combat metadata, session segments, participants, resource snapshots, ledger events, manual corrections, report settings, and recomputable statistics.
+That file contains the full stored combat logs, including combat metadata, participants, event history, report settings, corrections, and computed statistics.
 
-The world setting `sephrals-combat-log-stats.combatLogIndex` is kept as a compact discovery index and fallback metadata store. It lets the History tab find past combats quickly and keeps enough metadata to show rows such as title, status, start/end time, rounds, participants, net damage, and party DPR. It is not the primary payload store when the JSON file can be written.
-
-The History tab is built from that index and enriches rows from stored log payloads when available, so past combats remain discoverable even after a reload.
-
-If the current Foundry environment does not expose persistent file upload helpers to the client, SCLS falls back to storing full log payloads inline in the world-setting index so reloads still keep the data.
-
-Generated player reports are separate Foundry content: posting a report creates a normal chat message, and creating a journal report creates a normal journal entry. These reports contain only the filtered report output selected by the GM; they do not expose the internal ledger or GM-only events.
-
-Deleting a combat log from SCLS removes it from the central store and index. It does not delete chat messages or journal entries that were previously generated from that combat.
+The world setting `sephrals-combat-log-stats.combatLogIndex` is kept as a compact discovery index and fallback metadata store. It powers the History tab and keeps enough information to show old combats even after reloads.
 
 ## Impact Meter
 
-Default DPR is Applied Net DPR:
+The default DPR view is Applied Net DPR:
 
 ```text
 netDamageApplied / combatRounds
 ```
 
-The module also tracks rolled damage, gross applied damage, correction impact, party DPR, enemy DPR, side DPR, and per-combatant DPR. Unclear deltas are excluded from default DPR unless the GM classifies them or enables unclear-delta inclusion. The Impact Meter table can be sorted by each visible column.
+The Impact Meter is meant to answer the table's common questions at a glance: who carried damage, who supported, who controlled the battlefield, who went down, and how much pressure each side created. Unclear deltas stay out of the default view unless the GM explicitly chooses to include them. Every visible column can be sorted.
 
 ## Sharing
 
-Sharing is controlled through report settings per CombatLog. The GM selects which report sections should be included, then can post the filtered player report to chat, create a journal report, or export JSON/Markdown. The report is derived from the computed ledger statistics and never exposes raw events, GM notes, private rolls, hidden combatant data, or correction controls.
+Sharing is controlled through report settings per CombatLog. The GM chooses which sections belong in the report, then can post that report to chat, create a journal entry, or export it as JSON/Markdown. Reports never expose raw events, GM notes, private rolls, hidden combatant data, or correction controls.
 
 Available report sections include Combat Recap, Party Contributions, Blades/Bows/Close Calls, Spellwork, Healing and Support, Control Plays, Close Calls, Damage Spotlight, Hero Moments, Enemy Pressure, Tactical Turning Points, Support and Saves, and Aftermath.
 
