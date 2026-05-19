@@ -112,6 +112,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     await super._onRender(context, options);
     for (const panel of this.element.querySelectorAll("[data-panel]")) panel.hidden = panel.dataset.panel !== this.activeTab;
     for (const element of this.element.querySelectorAll("[data-detail-only]")) element.hidden = this.activeTab === "history";
+    applyButtonTooltips(this.element.closest(".scls-window") ?? this.element);
     for (const select of this.element.querySelectorAll("select[data-scls-action]")) {
       select.addEventListener("change", (event) => this.handleSelectChange(event));
     }
@@ -480,7 +481,7 @@ function combatMetrics(log) {
     ...row,
     damagePercent: percent(row.damageAppliedNet, topDamage),
     healingPercent: percent(row.healing, topHealing),
-    impact: impactLabel(row)
+    impactMetrics: impactMetrics(row)
   }));
   const totals = disciplineTotals(log, participants);
   const outputTotal = Math.max(1, totals.damage, totals.healing);
@@ -562,13 +563,23 @@ function actionKind(event) {
   return "utility";
 }
 
-function impactLabel(row) {
-  const parts = [];
-  if (row.damageAppliedNet) parts.push(`${row.damageAppliedNet} ${localize("SCLS.Label.NetDamage")}`);
-  if (row.healing) parts.push(`${row.healing} ${localize("SCLS.Label.Healing")}`);
-  if (row.control) parts.push(`${row.control} ${localize("SCLS.Label.Control")}`);
-  if (row.downed) parts.push(`${row.downed} ${localize("SCLS.Label.Downed")}`);
-  return parts.join(" | ") || "-";
+function impactMetrics(row) {
+  const metrics = [
+    impactMetric("damage", "fa-solid fa-burst", localize("SCLS.Label.NetDamage"), row.damageAppliedNet),
+    impactMetric("healing", "fa-solid fa-heart-pulse", localize("SCLS.Label.Healing"), row.healing),
+    impactMetric("control", "fa-solid fa-hand-sparkles", localize("SCLS.Label.Control"), row.control),
+    impactMetric("downed", "fa-solid fa-skull", localize("SCLS.Label.Downed"), row.downed)
+  ].filter((metric) => metric.value);
+  return metrics.length ? metrics : [impactMetric("empty", "fa-solid fa-minus", "", "-")];
+}
+
+function impactMetric(type, icon, label, value) {
+  return {
+    type,
+    icon,
+    label,
+    value
+  };
 }
 
 function percent(value, total) {
@@ -663,6 +674,14 @@ function applyReportSettings(log, formData) {
     shareUpdatedAt: new Date().toISOString()
   };
   if (log.shareSettings.isShared && !log.shareSettings.shareStartedAt) log.shareSettings.shareStartedAt = log.shareSettings.shareUpdatedAt;
+}
+
+function applyButtonTooltips(root) {
+  for (const button of root?.querySelectorAll?.("button") ?? []) {
+    if (button.getAttribute("title")) continue;
+    const title = button.dataset?.tooltip || button.getAttribute("aria-label") || button.innerText?.trim();
+    if (title) button.setAttribute("title", title);
+  }
 }
 
 function participantLookup(log) {

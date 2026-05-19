@@ -54,6 +54,8 @@ That file contains the full stored combat logs, including combat metadata, parti
 
 The world setting `sephrals-combat-log-stats.combatLogIndex` is kept as a compact discovery index and fallback metadata store. It powers the History tab and keeps enough information to show old combats even after reloads.
 
+On Foundry VTT v13, where client-side world file uploads can be unavailable or unreliable, SCLS uses the same world setting as an inline fallback for the stored combat logs. Foundry VTT v14 uses the world-data JSON file when the client upload API is available.
+
 ## Impact Meter
 
 The default DPR view is Applied Net DPR:

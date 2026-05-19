@@ -3,7 +3,14 @@ export const MODULE_TITLE = "Sephral’s Combat Log & Stats";
 export const SCHEMA_VERSION = 1;
 
 export const HOOKS = Object.freeze({
-  LOG_UPDATED: `${MODULE_ID}.logUpdated`
+  LOG_UPDATED: `${MODULE_ID}.logUpdated`,
+  LANGUAGE_CHANGED: `${MODULE_ID}.languageChanged`
+});
+
+export const LANGUAGE_MODES = Object.freeze({
+  FOLLOW_FOUNDRY: "followFoundry",
+  DE: "de",
+  EN: "en"
 });
 
 export const SETTINGS = Object.freeze({
@@ -27,6 +34,7 @@ export const SETTINGS = Object.freeze({
   AUTO_EXPORT_JOURNAL_ON_END: "autoExportJournalOnEnd",
   RETENTION_DAYS: "retentionDays",
   RESOURCE_PATHS: "resourcePaths",
+  LANGUAGE: "language",
   DEBUG_MODE: "debugMode"
 });
 

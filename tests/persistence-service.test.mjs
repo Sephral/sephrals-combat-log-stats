@@ -6,6 +6,8 @@ let storedIndex = null;
 let retentionDays = 0;
 
 globalThis.game = {
+  release: { generation: 14 },
+  version: "14.361",
   world: { id: "test-world" },
   settings: {
     get: (_moduleId, key) => key === SETTINGS.RETENTION_DAYS ? retentionDays : storedIndex,
@@ -91,6 +93,94 @@ test("logs are stored inline when file persistence is unavailable", async () => 
   assert.equal(storedIndex.logs[0].combatLogId, "inline-log");
   assert.equal(storedIndex.logs[0].inlineLog.title, "Inline");
   assert.deepEqual(loaded.events.map((event) => event.id), ["event1"]);
+});
+
+test("concurrent saves fall back inline after one failed upload", async () => {
+  const service = new CombatLogPersistenceService();
+  let uploadCount = 0;
+  globalThis.fetch = async () => ({ ok: false, status: 404 });
+  globalThis.FilePicker = {
+    browse: async () => ({}),
+    createDirectory: async () => ({}),
+    upload: async () => {
+      uploadCount += 1;
+      throw new Error("No upload permission");
+    }
+  };
+  retentionDays = 0;
+  storedIndex = { schemaVersion: 1, logs: [] };
+  const originalWarn = console.warn;
+  console.warn = () => {};
+
+  try {
+    await Promise.all([
+      service.saveLog({ id: "inline-a", title: "A", status: LOG_STATUS.ACTIVE, events: [], participants: [], computed: { summary: { rounds: 1 } } }),
+      service.saveLog({ id: "inline-b", title: "B", status: LOG_STATUS.ACTIVE, events: [], participants: [], computed: { summary: { rounds: 1 } } }),
+      service.saveLog({ id: "inline-c", title: "C", status: LOG_STATUS.ENDED, events: [], participants: [], computed: { summary: { rounds: 1 } } })
+    ]);
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(uploadCount, 1);
+  assert.deepEqual(storedIndex.logs.map((entry) => entry.combatLogId), ["inline-c", "inline-b", "inline-a"]);
+  assert.deepEqual(storedIndex.logs.map((entry) => entry.inlineLog?.title), ["C", "B", "A"]);
+});
+
+test("hanging file uploads time out and fall back inline", async () => {
+  const service = new CombatLogPersistenceService();
+  service.fileUploadTimeoutMs = 5;
+  let uploadCount = 0;
+  globalThis.fetch = async () => ({ ok: false, status: 404 });
+  globalThis.FilePicker = {
+    browse: async () => ({}),
+    createDirectory: async () => ({}),
+    upload: async () => {
+      uploadCount += 1;
+      return new Promise(() => {});
+    }
+  };
+  retentionDays = 0;
+  storedIndex = { schemaVersion: 1, logs: [] };
+  const originalWarn = console.warn;
+  console.warn = () => {};
+
+  try {
+    await service.saveLog({ id: "timeout-inline", title: "Timeout", status: LOG_STATUS.ACTIVE, events: [], participants: [], computed: { summary: { rounds: 1 } } });
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(uploadCount, 1);
+  assert.equal(service.filePersistenceDisabled, true);
+  assert.equal(storedIndex.logs[0].combatLogId, "timeout-inline");
+  assert.equal(storedIndex.logs[0].inlineLog.title, "Timeout");
+});
+
+test("v13 skips client file upload and stores inline", async () => {
+  const service = new CombatLogPersistenceService();
+  let uploadCount = 0;
+  globalThis.game.release.generation = 13;
+  globalThis.game.version = "13.351";
+  globalThis.FilePicker = {
+    upload: async () => {
+      uploadCount += 1;
+      return {};
+    }
+  };
+  retentionDays = 0;
+  storedIndex = { schemaVersion: 1, logs: [] };
+
+  try {
+    await service.saveLog({ id: "v13-inline", title: "V13", status: LOG_STATUS.ACTIVE, events: [], participants: [], computed: { summary: { rounds: 1 } } });
+  } finally {
+    globalThis.game.release.generation = 14;
+    globalThis.game.version = "14.361";
+  }
+
+  assert.equal(uploadCount, 0);
+  assert.equal(storedIndex.logs[0].combatLogId, "v13-inline");
+  assert.equal(storedIndex.logs[0].inlineLog.title, "V13");
 });
 
 test("inline index fallback hydrates the current central store shape", async () => {

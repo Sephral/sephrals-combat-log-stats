@@ -1,4 +1,4 @@
-import { MODULE_ID } from "./constants.js";
+import { LANGUAGE_MODES, MODULE_ID, SETTINGS } from "./constants.js";
 
 let moduleTranslations = {};
 let translationsPromise = null;
@@ -48,7 +48,7 @@ export function formatDateTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
   try {
-    return new Intl.DateTimeFormat(String(game?.i18n?.lang ?? "en"), { dateStyle: "medium", timeStyle: "short" }).format(date);
+    return new Intl.DateTimeFormat(activeLanguage(), { dateStyle: "medium", timeStyle: "short" }).format(date);
   } catch {
     return date.toLocaleString();
   }
@@ -92,8 +92,22 @@ export async function loadModuleTranslations() {
 }
 
 export function localize(key) {
-  const language = String(game?.i18n?.lang ?? "en").toLowerCase().startsWith("de") ? "de" : "en";
+  const language = activeLanguage();
   return moduleTranslations?.[language]?.[key] ?? game?.i18n?.localize?.(key) ?? key;
+}
+
+export function activeLanguage() {
+  const configured = selectedLanguageMode();
+  if (configured === LANGUAGE_MODES.DE || configured === LANGUAGE_MODES.EN) return configured;
+  return String(game?.i18n?.lang ?? "en").toLowerCase().startsWith("de") ? LANGUAGE_MODES.DE : LANGUAGE_MODES.EN;
+}
+
+function selectedLanguageMode() {
+  try {
+    return game?.settings?.get(MODULE_ID, SETTINGS.LANGUAGE) ?? LANGUAGE_MODES.FOLLOW_FOUNDRY;
+  } catch {
+    return LANGUAGE_MODES.FOLLOW_FOUNDRY;
+  }
 }
 
 export function format(key, data = {}) {

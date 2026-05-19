@@ -1,5 +1,5 @@
 import { getSystemAdapter } from "../adapters/adapter-registry.js";
-import { CONFIDENCE, EVENT_TYPES, HOOKS, LOG_STATUS, RESOURCE_INTERPRETATIONS, SEGMENT_REASONS, SETTINGS, SOURCE_KINDS } from "../constants.js";
+import { CONFIDENCE, EVENT_TYPES, HOOKS, LOG_STATUS, RESOURCE_INTERPRETATIONS, SEGMENT_REASONS, SETTINGS, SHARE_MODES, SOURCE_KINDS } from "../constants.js";
 import { closeCurrentSegment, createCombatLog, createSessionSegment, snapshotParticipant } from "../models/combat-log.js";
 import { getSetting } from "../settings.js";
 import { cloneData, debugLog, getProperty, isoNow } from "../utils.js";
@@ -85,18 +85,27 @@ export class CombatLogService {
   }
 
   async runEndOfCombatReports(log) {
+    const autoPost = getSetting(SETTINGS.AUTO_POST_PLAYER_SUMMARY_ON_END, false);
+    const autoJournal = getSetting(SETTINGS.AUTO_EXPORT_JOURNAL_ON_END, false);
+    if (!autoPost && !autoJournal) return;
+    prepareAutoReportSharing(log);
     if (!this.playerReports.canShare(log)) return;
-    if (getSetting(SETTINGS.AUTO_POST_PLAYER_SUMMARY_ON_END, false)) await this.playerReports.postChatSummary(log);
-    if (getSetting(SETTINGS.AUTO_EXPORT_JOURNAL_ON_END, false)) await this.playerReports.createJournalReport(log);
+    if (autoPost) await this.playerReports.postChatSummary(log);
+    if (autoJournal) await this.playerReports.createJournalReport(log);
   }
 
   async deleteCombat(combat) {
     const log = this.activeLogs.get(combat?.id);
     if (!log) return null;
-    log.status = LOG_STATUS.ORPHANED;
-    log.lastSeenAt = isoNow();
-    new CombatEventLedger(log).combatEvent(EVENT_TYPES.COMBAT_DELETED, combat, {});
+    const now = isoNow();
+    closeCurrentSegment(log, SEGMENT_REASONS.COMBAT_ENDED, now);
+    log.status = LOG_STATUS.ENDED;
+    log.endedAt = now;
+    log.lastSeenAt = now;
+    new CombatEventLedger(log).combatEvent(EVENT_TYPES.COMBAT_ENDED, combat, { reason: SEGMENT_REASONS.COMBAT_ENDED, deletedCombatDocument: true });
     this.activeLogs.delete(combat.id);
+    await this.saveAndCompute(log);
+    await this.runEndOfCombatReports(log);
     return this.saveAndCompute(log);
   }
 
@@ -481,6 +490,28 @@ export class CombatLogService {
     if (deleted) globalThis.Hooks?.callAll?.(HOOKS.LOG_UPDATED, { id: logId, deleted: true });
     return deleted;
   }
+}
+
+function prepareAutoReportSharing(log) {
+  const defaultShareMode = getSetting(SETTINGS.DEFAULT_SHARE_MODE, log.shareSettings?.shareMode ?? SHARE_MODES.SUMMARY_ONLY);
+  log.shareSettings = {
+    ...log.shareSettings,
+    isShared: true,
+    shareMode: defaultShareMode === SHARE_MODES.GM_ONLY ? SHARE_MODES.SUMMARY_ONLY : defaultShareMode,
+    includePartyStats: true,
+    includeEnemyStats: true,
+    includeNpcNames: true,
+    includePrivateRolls: false,
+    includeGMNotes: false,
+    includeUnclearEvents: false,
+    includeDPR: true,
+    includeTimeline: true,
+    includeCorrections: false,
+    anonymizeEnemies: getSetting(SETTINGS.DEFAULT_ANONYMIZE_ENEMIES, log.shareSettings?.anonymizeEnemies ?? true),
+    allowPlayersToOpenReport: true,
+    shareUpdatedAt: isoNow()
+  };
+  if (!log.shareSettings.shareStartedAt) log.shareSettings.shareStartedAt = log.shareSettings.shareUpdatedAt;
 }
 
 function actorDataSnapshot(actor) {

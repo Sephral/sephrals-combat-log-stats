@@ -97,3 +97,52 @@ test("deleting a log removes matching active combat state", async () => {
   assert.equal(service.activeLogs.has("combat1"), false);
   assert.equal(hookCalls.at(-1)[1].deleted, true);
 });
+
+test("auto end reports prepare sharing for unshared logs", async () => {
+  settings.set(`sephrals-combat-log-stats.${SETTINGS.AUTO_POST_PLAYER_SUMMARY_ON_END}`, true);
+  settings.set(`sephrals-combat-log-stats.${SETTINGS.DEFAULT_SHARE_MODE}`, SHARE_MODES.GM_ONLY);
+  settings.set(`sephrals-combat-log-stats.${SETTINGS.DEFAULT_ANONYMIZE_ENEMIES}`, false);
+  const service = new CombatLogService();
+  let postedShareSettings = null;
+  service.playerReports.postChatSummary = async (log) => {
+    postedShareSettings = { ...log.shareSettings };
+    return { id: "chat1" };
+  };
+  const log = { id: "log1", combatId: "combat1", sceneUuid: "Scene.test", participants: [], sessionSegments: [], events: [], shareSettings: { isShared: false, shareMode: SHARE_MODES.GM_ONLY } };
+
+  await service.runEndOfCombatReports(log);
+
+  assert.equal(postedShareSettings.isShared, true);
+  assert.equal(postedShareSettings.shareMode, SHARE_MODES.SUMMARY_ONLY);
+  assert.equal(postedShareSettings.allowPlayersToOpenReport, true);
+  assert.equal(postedShareSettings.anonymizeEnemies, false);
+  settings.delete(`sephrals-combat-log-stats.${SETTINGS.AUTO_POST_PLAYER_SUMMARY_ON_END}`);
+  settings.set(`sephrals-combat-log-stats.${SETTINGS.DEFAULT_SHARE_MODE}`, SHARE_MODES.FULL_VISIBLE_RECAP);
+});
+
+test("deleting an active Foundry combat ends the log and runs auto reports", async () => {
+  settings.set(`sephrals-combat-log-stats.${SETTINGS.AUTO_POST_PLAYER_SUMMARY_ON_END}`, true);
+  const service = new CombatLogService();
+  const savedStatuses = [];
+  let posted = false;
+  service.persistence.saveLog = async (log) => {
+    savedStatuses.push(log.status);
+    return log;
+  };
+  service.playerReports.postChatSummary = async () => {
+    posted = true;
+    return { id: "chat1" };
+  };
+  const combat = { id: "combat1", uuid: "Combat.combat1", round: 3, turn: 2, combatants: [], scene: { uuid: "Scene.test" } };
+  const log = { id: "log1", combatId: combat.id, combatUuid: combat.uuid, sceneUuid: "Scene.test", participants: [], sessionSegments: [{ id: "segment1", startedAt: "2026-05-19T10:00:00.000Z", endedAt: null, reason: "combatStarted" }], events: [], shareSettings: { isShared: false } };
+  service.activeLogs.set(combat.id, log);
+
+  const ended = await service.deleteCombat(combat);
+
+  assert.equal(ended.status, "ended");
+  assert.ok(ended.endedAt);
+  assert.equal(service.activeLogs.has(combat.id), false);
+  assert.equal(posted, true);
+  assert.deepEqual(savedStatuses, ["ended", "ended"]);
+  settings.delete(`sephrals-combat-log-stats.${SETTINGS.AUTO_POST_PLAYER_SUMMARY_ON_END}`);
+});

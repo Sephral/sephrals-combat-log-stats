@@ -2,12 +2,16 @@ import { LOG_STATUS, MODULE_ID, SCHEMA_VERSION, SETTINGS } from "../constants.js
 import { getSetting, setSetting } from "../settings.js";
 import { cloneData, debugLog, isoNow } from "../utils.js";
 
+const FILE_UPLOAD_TIMEOUT_MS = 10000;
+
 export class CombatLogPersistenceService {
   constructor() {
     this.cache = new Map();
     this.missingFilePaths = new Set();
     this.filePersistenceDisabled = false;
     this.storeCache = null;
+    this.writeQueue = Promise.resolve();
+    this.fileUploadTimeoutMs = FILE_UPLOAD_TIMEOUT_MS;
   }
 
   storageBasePath() {
@@ -52,29 +56,39 @@ export class CombatLogPersistenceService {
   }
 
   async saveLog(log) {
-    const savedLog = cloneData(log);
-    this.cache.set(savedLog.id, savedLog);
-    const store = await this.loadStore();
-    const existing = store.logs.findIndex((candidate) => candidate.id === savedLog.id);
-    if (existing >= 0) store.logs.splice(existing, 1, savedLog);
-    else store.logs.unshift(savedLog);
-    await this.saveStore(store);
-    return log;
+    return this.enqueueWrite(async () => {
+      const savedLog = cloneData(log);
+      this.cache.set(savedLog.id, savedLog);
+      const store = await this.loadStore();
+      const existing = store.logs.findIndex((candidate) => candidate.id === savedLog.id);
+      if (existing >= 0) store.logs.splice(existing, 1, savedLog);
+      else store.logs.unshift(savedLog);
+      await this.saveStore(store);
+      return log;
+    });
   }
 
   async deleteLog(logId) {
-    if (!logId) return false;
-    const store = await this.loadStore();
-    const nextLogs = store.logs.filter((candidate) => candidate.id !== logId);
-    const removedFromStore = nextLogs.length !== store.logs.length;
-    this.cache.delete(logId);
+    return this.enqueueWrite(async () => {
+      if (!logId) return false;
+      const store = await this.loadStore();
+      const nextLogs = store.logs.filter((candidate) => candidate.id !== logId);
+      const removedFromStore = nextLogs.length !== store.logs.length;
+      this.cache.delete(logId);
 
-    if (removedFromStore) {
-      await this.saveStore({ ...store, logs: nextLogs });
-      return true;
-    }
+      if (removedFromStore) {
+        await this.saveStore({ ...store, logs: nextLogs });
+        return true;
+      }
 
-    return false;
+      return false;
+    });
+  }
+
+  enqueueWrite(operation) {
+    const next = this.writeQueue.then(operation, operation);
+    this.writeQueue = next.catch(() => {});
+    return next;
   }
 
   async loadLog(logId) {
@@ -112,6 +126,11 @@ export class CombatLogPersistenceService {
 
   async tryPersistStoreToFile(store) {
     if (this.filePersistenceDisabled) return false;
+    if (!supportsClientFileUpload()) {
+      this.filePersistenceDisabled = true;
+      debugLog("File persistence skipped for this Foundry generation; combat log store remains in world setting fallback");
+      return false;
+    }
     const FilePicker = foundry?.applications?.apps?.FilePicker?.implementation ?? globalThis.FilePicker;
     const data = JSON.stringify(store, null, 2);
     if (!FilePicker?.upload) {
@@ -122,7 +141,7 @@ export class CombatLogPersistenceService {
     try {
       await this.ensureDirectories();
       const file = new File([data], "combat-logs.json", { type: "application/json" });
-      await FilePicker.upload("data", this.storageBasePath(), file, {}, { notify: false });
+      await withTimeout(FilePicker.upload("data", this.storageBasePath(), file, {}, { notify: false }), this.fileUploadTimeoutMs, "Timed out while uploading combat log store");
       return true;
     } catch (error) {
       this.filePersistenceDisabled = true;
@@ -207,6 +226,19 @@ export class CombatLogPersistenceService {
     return index;
   }
 
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timeoutId = null;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+function supportsClientFileUpload() {
+  const generation = Number(game?.release?.generation ?? String(game?.version ?? "").split(".")[0]);
+  return !Number.isFinite(generation) || generation >= 14;
 }
 
 function normalizeStore(store) {

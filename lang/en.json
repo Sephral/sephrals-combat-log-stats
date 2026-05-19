@@ -75,7 +75,7 @@
   "SCLS.Button.ExportJson": "Export JSON",
   "SCLS.Button.ExportMarkdown": "Export Markdown",
   "SCLS.Button.Open": "Select",
-  "SCLS.Button.Select": "Select",
+  "SCLS.Button.Select": "Select -->",
   "SCLS.Button.Delete": "Delete",
   "SCLS.Button.Cancel": "Cancel",
   "SCLS.Button.RenameCombat": "Rename",
@@ -148,6 +148,11 @@
   "SCLS.Setting.includeUnclearDeltasInStats.Hint": "Count unclear resource changes in statistics before the GM classifies them. Leave off for conservative results.",
   "SCLS.Setting.retentionDays.Name": "History retention days",
   "SCLS.Setting.retentionDays.Hint": "Automatically prune ended combat logs older than this many days. Use 0 to keep all logs.",
+  "SCLS.Setting.language.Name": "Language",
+  "SCLS.Setting.language.Hint": "Choose the language used by SCLS. Follow Foundry uses the active Foundry language.",
+  "SCLS.Language.FollowFoundry": "Follow Foundry",
+  "SCLS.Language.DE": "DE",
+  "SCLS.Language.EN": "EN",
   "SCLS.Setting.debugMode.Name": "Debug logging",
   "SCLS.Setting.debugMode.Hint": "Write additional SCLS diagnostic messages to the browser console. Use only while troubleshooting."
 }

@@ -1,4 +1,4 @@
-import { DEFAULT_RESOURCE_PATHS, DPR_METHODS, MODULE_ID, SETTINGS, SHARE_MODES } from "./constants.js";
+import { DEFAULT_RESOURCE_PATHS, DPR_METHODS, HOOKS, LANGUAGE_MODES, MODULE_ID, SETTINGS, SHARE_MODES } from "./constants.js";
 
 const SETTING_DEFINITIONS = [
   [SETTINGS.INDEX, { scope: "world", config: false, type: Object, default: { schemaVersion: 1, logs: [] } }],
@@ -21,6 +21,7 @@ const SETTING_DEFINITIONS = [
   [SETTINGS.AUTO_EXPORT_JOURNAL_ON_END, { scope: "world", config: false, type: Boolean, default: false }],
   [SETTINGS.RETENTION_DAYS, { scope: "world", config: true, type: Number, default: 0 }],
   [SETTINGS.RESOURCE_PATHS, { scope: "world", config: false, type: Object, default: DEFAULT_RESOURCE_PATHS }],
+  [SETTINGS.LANGUAGE, { scope: "client", config: true, type: String, choices: { [LANGUAGE_MODES.FOLLOW_FOUNDRY]: "SCLS.Language.FollowFoundry", [LANGUAGE_MODES.DE]: "SCLS.Language.DE", [LANGUAGE_MODES.EN]: "SCLS.Language.EN" }, default: LANGUAGE_MODES.FOLLOW_FOUNDRY, onChange: () => Hooks.callAll(HOOKS.LANGUAGE_CHANGED) }],
   [SETTINGS.DEBUG_MODE, { scope: "client", config: true, type: Boolean, default: false }]
 ];
 

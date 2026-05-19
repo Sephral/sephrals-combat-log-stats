@@ -270,15 +270,20 @@
   background: rgba(95, 141, 211, 0.12);
 }
 
-.scls-history-table td:first-child strong,
-.scls-history-table td:first-child span {
+.scls-history-combat-cell strong,
+.scls-history-combat-cell span {
   display: block;
 }
 
-.scls-history-table td:first-child span {
+.scls-history-combat-cell span {
   color: var(--scls-muted);
   font-size: 0.76rem;
   margin-top: 0.15rem;
+}
+
+.scls-history-select-cell {
+  width: 7.5rem;
+  white-space: nowrap;
 }
 
 .scls-history-actions {
@@ -295,7 +300,17 @@
 }
 
 .scls-history-actions button {
-  min-width: 5.6rem;
+  min-width: 2.35rem;
+}
+
+.scls-history-select-cell button {
+  min-width: 6.7rem;
+}
+
+.scls-button--icon {
+  width: 2.35rem;
+  min-height: 2rem;
+  padding-inline: 0.45rem;
 }
 
 .scls-window button i {
@@ -373,6 +388,7 @@
   align-items: center;
   gap: 0.35rem;
   min-height: 1.4rem;
+  min-width: 0;
   white-space: nowrap;
 }
 
@@ -387,6 +403,12 @@
   object-fit: cover;
   border-radius: 4px;
   flex: 0 0 20px;
+}
+
+.scls-combatant-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .scls-table img.scls-avatar--tiny {
@@ -425,7 +447,7 @@
 
 .scls-metrics-row {
   display: grid;
-  grid-template-columns: minmax(12rem, 1fr) minmax(12rem, 1.2fr) minmax(10rem, auto);
+  grid-template-columns: minmax(11rem, 13rem) minmax(0, 24rem) minmax(9.5rem, max-content);
   align-items: center;
   gap: 0.65rem;
   padding: 0.45rem 0.55rem;
@@ -438,15 +460,21 @@
   grid-template-columns: minmax(7rem, 0.8fr) minmax(10rem, 1fr) auto;
 }
 
+.scls-metrics-row:not(.scls-metrics-row--compact) > .scls-combatant-cell {
+  width: 100%;
+}
+
 .scls-metrics-row strong {
   font-size: 0.85rem;
   color: rgba(245, 240, 232, 0.88);
-  text-align: right;
 }
 
 .scls-metrics-bars {
   display: grid;
   gap: 0.25rem;
+  width: 24rem;
+  max-width: 100%;
+  justify-self: stretch;
 }
 
 .scls-meter {
@@ -477,6 +505,49 @@
 .scls-meter--healing i,
 .scls-discipline--healing i {
   background: var(--scls-heal);
+}
+
+.scls-impact-badges {
+  display: inline-flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  min-width: 9rem;
+  justify-self: end;
+}
+
+.scls-impact-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  min-width: 2.35rem;
+  min-height: 1.5rem;
+  padding: 0.12rem 0.35rem;
+  border: 1px solid var(--scls-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.055);
+  color: rgba(245, 240, 232, 0.9);
+}
+
+.scls-impact-badge i {
+  font-size: 0.78rem;
+}
+
+.scls-impact-badge--damage i,
+.scls-impact-badge--downed i {
+  color: var(--scls-danger);
+}
+
+.scls-impact-badge--healing i {
+  color: var(--scls-heal);
+}
+
+.scls-impact-badge--control i {
+  color: var(--scls-accent);
+}
+
+.scls-impact-badge--empty {
+  color: var(--scls-muted);
 }
 
 .scls-discipline-grid {
@@ -753,5 +824,14 @@
 
   .scls-metrics-row strong {
     text-align: left;
+  }
+
+  .scls-metrics-bars {
+    width: 100%;
+  }
+
+  .scls-impact-badges {
+    justify-content: flex-start;
+    min-width: 0;
   }
 }

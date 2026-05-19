@@ -14,7 +14,7 @@
   ],
   "url": "https://github.com/Sephral/sephrals-combat-log-stats.git",
   "esmodules": [
-    "scripts/scls-entry-20260517v.js"
+    "scripts/scls.js"
   ],
   "styles": [
     "styles/scls.css"

@@ -1,6 +1,6 @@
-import { EVENT_TYPES, MODULE_ID, SETTINGS } from "./constants.js";
+import { EVENT_TYPES, HOOKS, MODULE_ID, SETTINGS } from "./constants.js";
 import { CombatLogApp } from "./apps/combat-log-app.js";
-import { CombatLogService } from "./services/combat-log-service.js";
+import { CombatLogService } from "./services/combat-log-service.js?v=20260519f";
 import { getSetting, registerSettings } from "./settings.js";
 import { isGM, loadModuleTranslations, localize, registerTemplateHelpers } from "./utils.js";
 
@@ -56,6 +56,7 @@ function injectCombatTrackerButton(_app, html) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "scls-combat-tracker-button";
+  button.title = localize("SCLS.SceneTool.Open");
   button.innerHTML = `<i class="fa-solid fa-chart-line"></i> ${localize("SCLS.SceneTool.Open")}`;
   button.addEventListener("click", () => openCombatLog());
   const target = root.querySelector(".directory-footer, footer, .combat-tracker-header") ?? root;
@@ -63,6 +64,8 @@ function injectCombatTrackerButton(_app, html) {
 }
 
 function registerHooks() {
+  Hooks.on(HOOKS.LANGUAGE_CHANGED, applyLanguageChange);
+
   Hooks.on("createCombat", (combat) => {
     if (!isGM()) return;
     void combatLogService.startCombat(combat);
@@ -150,6 +153,15 @@ function registerHooks() {
   });
 
   Hooks.on("renderCombatTracker", injectCombatTrackerButton);
+}
+
+function applyLanguageChange() {
+  combatLogApp?.render?.({ force: true });
+  for (const button of document.querySelectorAll(".scls-combat-tracker-button")) {
+    button.title = localize("SCLS.SceneTool.Open");
+    button.innerHTML = `<i class="fa-solid fa-chart-line"></i> ${localize("SCLS.SceneTool.Open")}`;
+  }
+  ui.controls?.render?.();
 }
 
 function trackActiveEffect(type, effect, changed = {}) {

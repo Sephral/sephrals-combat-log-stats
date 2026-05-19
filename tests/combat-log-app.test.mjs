@@ -143,6 +143,7 @@ test("combat metrics summarize contributions, disciplines, and top actions", () 
 
   assert.equal(result.contributionRows[0].name, "Hero");
   assert.equal(result.contributionRows[0].damagePercent, 100);
+  assert.deepEqual(result.contributionRows[0].impactMetrics.map((metric) => metric.type), ["damage", "healing", "control", "downed"]);
   assert.equal(result.totals.healing, 5);
   assert.equal(result.totals.control, 1);
   assert.equal(result.totals.downed, 1);

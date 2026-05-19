@@ -75,7 +75,7 @@
   "SCLS.Button.ExportJson": "JSON exportieren",
   "SCLS.Button.ExportMarkdown": "Markdown exportieren",
   "SCLS.Button.Open": "Auswaehlen",
-  "SCLS.Button.Select": "Auswaehlen",
+  "SCLS.Button.Select": "Select -->",
   "SCLS.Button.Delete": "Loeschen",
   "SCLS.Button.Cancel": "Abbrechen",
   "SCLS.Button.RenameCombat": "Umbenennen",
@@ -148,6 +148,11 @@
   "SCLS.Setting.includeUnclearDeltasInStats.Hint": "Zaehlt unklare Ressourcen-Aenderungen in Statistiken, bevor der GM sie klassifiziert. Fuer konservative Ergebnisse deaktiviert lassen.",
   "SCLS.Setting.retentionDays.Name": "Aufbewahrung der Historie in Tagen",
   "SCLS.Setting.retentionDays.Hint": "Loescht beendete Kampflogs automatisch, wenn sie aelter als diese Anzahl Tage sind. 0 behaelt alle Logs.",
+  "SCLS.Setting.language.Name": "Sprache",
+  "SCLS.Setting.language.Hint": "Waehlt die von SCLS verwendete Sprache. Foundry folgen verwendet die aktive Foundry-Sprache.",
+  "SCLS.Language.FollowFoundry": "Foundry folgen",
+  "SCLS.Language.DE": "DE",
+  "SCLS.Language.EN": "EN",
   "SCLS.Setting.debugMode.Name": "Debug-Logging",
   "SCLS.Setting.debugMode.Hint": "Schreibt zusaetzliche SCLS-Diagnosemeldungen in die Browser-Konsole. Nur zur Fehlersuche aktivieren."
 }

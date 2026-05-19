@@ -9,7 +9,7 @@
   {{#if tabNavigation.hasTabs}}
   <nav class="scls-tabs">
     <div class="scls-tab-group scls-tab-group--history">
-      <button type="button" class="{{#if tabNavigation.historyTab.active}}is-active{{/if}}" data-action="switchTab" data-tab="{{tabNavigation.historyTab.id}}"><i class="{{tabNavigation.historyTab.icon}}" aria-hidden="true"></i><span>{{tabNavigation.historyTab.label}}</span></button>
+      <button type="button" class="{{#if tabNavigation.historyTab.active}}is-active{{/if}}" data-action="switchTab" data-tab="{{tabNavigation.historyTab.id}}" title="{{tabNavigation.historyTab.label}}"><i class="{{tabNavigation.historyTab.icon}}" aria-hidden="true"></i><span>{{tabNavigation.historyTab.label}}</span></button>
     </div>
     {{#if tabNavigation.showConnector}}
     <div class="scls-tab-connector" aria-hidden="true">
@@ -18,7 +18,7 @@
     </div>
     <div class="scls-tab-group scls-tab-group--details">
       {{#each tabNavigation.detailTabs}}
-      <button type="button" class="{{#if this.active}}is-active{{/if}}" data-action="switchTab" data-tab="{{this.id}}"><i class="{{this.icon}}" aria-hidden="true"></i><span>{{this.label}}</span></button>
+      <button type="button" class="{{#if this.active}}is-active{{/if}}" data-action="switchTab" data-tab="{{this.id}}" title="{{this.label}}"><i class="{{this.icon}}" aria-hidden="true"></i><span>{{this.label}}</span></button>
       {{/each}}
     </div>
     {{/if}}
@@ -30,12 +30,12 @@
       <h3>{{sclsLocalize "SCLS.Tab.history"}}</h3>
       {{#if historyRows.length}}
       <table class="scls-table scls-history-table">
-        <thead><tr><th>{{sclsLocalize "SCLS.Label.Combat"}}</th><th>{{sclsLocalize "SCLS.Label.Status"}}</th><th>{{sclsLocalize "SCLS.Label.Started"}}</th><th>{{sclsLocalize "SCLS.Label.Ended"}}</th><th>{{sclsLocalize "SCLS.Label.Rounds"}}</th><th>{{sclsLocalize "SCLS.Label.Participants"}}</th><th>{{sclsLocalize "SCLS.Label.NetDamage"}}</th><th>{{sclsLocalize "SCLS.Label.PartyDPR"}}</th><th>{{sclsLocalize "SCLS.Label.Actions"}}</th></tr></thead>
+        <thead><tr><th></th><th>{{sclsLocalize "SCLS.Label.Combat"}}</th><th>{{sclsLocalize "SCLS.Label.Started"}}</th><th>{{sclsLocalize "SCLS.Label.Ended"}}</th><th>{{sclsLocalize "SCLS.Label.Rounds"}}</th><th>{{sclsLocalize "SCLS.Label.Participants"}}</th><th>{{sclsLocalize "SCLS.Label.NetDamage"}}</th><th>{{sclsLocalize "SCLS.Label.PartyDPR"}}</th><th>{{sclsLocalize "SCLS.Label.Actions"}}</th></tr></thead>
         <tbody>
           {{#each historyRows}}
           <tr class="{{#if this.selected}}is-selected{{/if}}">
-            <td><strong>{{this.title}}</strong><span>{{this.loadedLabel}}</span></td>
-            <td><span class="scls-status scls-status--{{this.status}}">{{this.statusLabel}}</span></td>
+            <td class="scls-history-select-cell"><button type="button" data-action="openLog" data-log-id="{{this.combatLogId}}" title="{{sclsLocalize "SCLS.Button.Select"}}"><i class="fa-solid fa-folder-open" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Select"}}</span></button></td>
+            <td class="scls-history-combat-cell"><strong>{{this.title}}</strong><span>{{this.loadedLabel}}</span></td>
             <td>{{this.startedLabel}}</td>
             <td>{{this.endedLabel}}</td>
             <td>{{this.rounds}}</td>
@@ -44,8 +44,7 @@
             <td>{{this.partyDPR}}</td>
             <td>
               <div class="scls-history-actions">
-                <button type="button" data-action="openLog" data-log-id="{{this.combatLogId}}"><i class="fa-solid fa-folder-open" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Select"}}</span></button>
-                <button type="button" class="scls-button--danger" data-action="deleteLog" data-log-id="{{this.combatLogId}}" data-log-title="{{this.title}}"><i class="fa-solid fa-trash" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Delete"}}</span></button>
+                <button type="button" class="scls-button--danger scls-button--icon" data-action="deleteLog" data-log-id="{{this.combatLogId}}" data-log-title="{{this.title}}" title="{{sclsLocalize "SCLS.Button.Delete"}}" aria-label="{{sclsLocalize "SCLS.Button.Delete"}}"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
               </div>
             </td>
           </tr>
@@ -65,7 +64,7 @@
           <span>{{sclsLocalize "SCLS.Label.CombatName"}}</span>
           <input type="text" name="title" value="{{log.title}}">
         </label>
-        <button type="button" data-action="renameLog"><i class="fa-solid fa-pen" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.RenameCombat"}}</span></button>
+        <button type="button" data-action="renameLog" title="{{sclsLocalize "SCLS.Button.RenameCombat"}}"><i class="fa-solid fa-pen" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.RenameCombat"}}</span></button>
       </form>
       <div class="scls-meta-line"><span>{{summary.status}}</span><span>{{summary.rounds}} {{sclsLocalize "SCLS.Label.Rounds"}}</span><span>{{summary.sessionCount}} {{sclsLocalize "SCLS.Label.Sessions"}}</span></div>
     </div>
@@ -100,12 +99,16 @@
       <div class="scls-metrics-list">
         {{#each combatMetrics.contributionRows}}
         <div class="scls-metrics-row">
-          <span class="scls-combatant-cell"><img class="scls-avatar--tiny" src="{{this.img}}" alt="">{{this.name}}</span>
+          <span class="scls-combatant-cell"><img class="scls-avatar--tiny" src="{{this.img}}" alt=""><span class="scls-combatant-name">{{this.name}}</span></span>
           <div class="scls-metrics-bars">
             <span class="scls-meter scls-meter--damage" style="--scls-bar: {{this.damagePercent}}%"><i></i></span>
             <span class="scls-meter scls-meter--healing" style="--scls-bar: {{this.healingPercent}}%"><i></i></span>
           </div>
-          <strong>{{this.impact}}</strong>
+          <div class="scls-impact-badges" aria-label="{{sclsLocalize "SCLS.Metrics.Contributions"}}">
+            {{#each this.impactMetrics}}
+            <span class="scls-impact-badge scls-impact-badge--{{this.type}}" title="{{this.label}}"><i class="{{this.icon}}" aria-hidden="true"></i><strong>{{this.value}}</strong></span>
+            {{/each}}
+          </div>
         </div>
         {{/each}}
       </div>
@@ -120,7 +123,7 @@
         <div class="scls-metric"><span>{{sclsLocalize "SCLS.Label.UnknownDPR"}}</span><strong>{{computed.dpr.unknownDPR}}</strong></div>
       </div>
       <table class="scls-table">
-        <thead><tr>{{#each dprColumns}}<th><button type="button" class="scls-sort-button {{#if this.active}}is-active{{/if}}" data-action="sortDpr" data-sort-key="{{this.key}}"><span>{{this.label}}</span><i class="{{this.icon}}" aria-hidden="true"></i></button></th>{{/each}}</tr></thead>
+        <thead><tr>{{#each dprColumns}}<th><button type="button" class="scls-sort-button {{#if this.active}}is-active{{/if}}" data-action="sortDpr" data-sort-key="{{this.key}}" title="{{this.label}}"><span>{{this.label}}</span><i class="{{this.icon}}" aria-hidden="true"></i></button></th>{{/each}}</tr></thead>
         <tbody>
           {{#each dprRows}}
           <tr><td><span class="scls-combatant-cell"><img class="scls-avatar--tiny" src="{{this.img}}" alt="">{{this.name}}</span></td><td>{{this.side}}</td><td>{{this.damageAppliedNet}}</td><td>{{this.healing}}</td><td>{{this.martial}}</td><td>{{this.ranged}}</td><td>{{this.magic}}</td><td>{{this.control}}</td><td>{{this.downed}}</td><td>{{this.netDPR}}</td></tr>
@@ -146,9 +149,9 @@
             <td>{{this.note}}</td>
             <td>
               {{#if this.ignored}}
-              <button type="button" data-action="restoreEvent" data-event-id="{{this.id}}"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Restore"}}</span></button>
+              <button type="button" data-action="restoreEvent" data-event-id="{{this.id}}" title="{{sclsLocalize "SCLS.Button.Restore"}}"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Restore"}}</span></button>
               {{else}}
-              <button type="button" data-action="ignoreEvent" data-event-id="{{this.id}}"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Ignore"}}</span></button>
+              <button type="button" data-action="ignoreEvent" data-event-id="{{this.id}}" title="{{sclsLocalize "SCLS.Button.Ignore"}}"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Ignore"}}</span></button>
               {{/if}}
             </td>
           </tr>
@@ -174,9 +177,9 @@
             <td>{{this.confidence}}</td>
             <td>
               {{#if this.ignored}}
-              <button type="button" data-action="restoreEvent" data-event-id="{{this.id}}"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Restore"}}</span></button>
+              <button type="button" data-action="restoreEvent" data-event-id="{{this.id}}" title="{{sclsLocalize "SCLS.Button.Restore"}}"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Restore"}}</span></button>
               {{else}}
-              <button type="button" data-action="ignoreEvent" data-event-id="{{this.id}}"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Ignore"}}</span></button>
+              <button type="button" data-action="ignoreEvent" data-event-id="{{this.id}}" title="{{sclsLocalize "SCLS.Button.Ignore"}}"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Ignore"}}</span></button>
               {{/if}}
             </td>
           </tr>
@@ -290,14 +293,14 @@
           <label><input type="checkbox" name="reportSections" value="{{this.value}}" {{#if this.selected}}checked{{/if}}> {{this.label}}</label>
           {{/each}}
         </fieldset>
-        <button type="button" data-action="toggleSharing"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.SaveSharing"}}</span></button>
-        <button type="button" data-action="postPlayerReport" {{#unless canShareReport}}disabled{{/unless}}><i class="fa-solid fa-message" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.PostPlayerReport"}}</span></button>
-        <button type="button" data-action="createJournalReport" {{#unless canShareReport}}disabled{{/unless}}><i class="fa-solid fa-book-open" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.CreateJournalReport"}}</span></button>
+        <button type="button" data-action="toggleSharing" title="{{sclsLocalize "SCLS.Button.SaveSharing"}}"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.SaveSharing"}}</span></button>
+        <button type="button" data-action="postPlayerReport" title="{{sclsLocalize "SCLS.Button.PostPlayerReport"}}" {{#unless canShareReport}}disabled{{/unless}}><i class="fa-solid fa-message" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.PostPlayerReport"}}</span></button>
+        <button type="button" data-action="createJournalReport" title="{{sclsLocalize "SCLS.Button.CreateJournalReport"}}" {{#unless canShareReport}}disabled{{/unless}}><i class="fa-solid fa-book-open" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.CreateJournalReport"}}</span></button>
       </form>
       <h4>{{sclsLocalize "SCLS.Label.Export"}}</h4>
       <div class="scls-share-actions">
-      <button type="button" data-action="exportJson"><i class="fa-solid fa-file-code" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.ExportJson"}}</span></button>
-      <button type="button" data-action="exportMarkdown"><i class="fa-brands fa-markdown" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.ExportMarkdown"}}</span></button>
+      <button type="button" data-action="exportJson" title="{{sclsLocalize "SCLS.Button.ExportJson"}}"><i class="fa-solid fa-file-code" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.ExportJson"}}</span></button>
+      <button type="button" data-action="exportMarkdown" title="{{sclsLocalize "SCLS.Button.ExportMarkdown"}}"><i class="fa-brands fa-markdown" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.ExportMarkdown"}}</span></button>
       </div>
     </section>
   {{/if}}
