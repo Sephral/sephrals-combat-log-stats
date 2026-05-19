@@ -126,7 +126,7 @@
         <thead><tr>{{#each dprColumns}}<th><button type="button" class="scls-sort-button {{#if this.active}}is-active{{/if}}" data-action="sortDpr" data-sort-key="{{this.key}}" title="{{this.label}}"><span>{{this.label}}</span><i class="{{this.icon}}" aria-hidden="true"></i></button></th>{{/each}}</tr></thead>
         <tbody>
           {{#each dprRows}}
-          <tr><td><span class="scls-combatant-cell"><img class="scls-avatar--tiny" src="{{this.img}}" alt="">{{this.name}}</span></td><td>{{this.side}}</td><td>{{this.damageAppliedNet}}</td><td>{{this.healing}}</td><td>{{this.martial}}</td><td>{{this.ranged}}</td><td>{{this.magic}}</td><td>{{this.control}}</td><td>{{this.downed}}</td><td>{{this.netDPR}}</td></tr>
+          <tr><td><span class="scls-combatant-cell"><img class="scls-avatar--tiny" src="{{this.img}}" alt="">{{this.name}}</span></td><td>{{this.side}}</td><td>{{this.damageAppliedNet}}</td><td>{{this.damageTakenNet}}</td><td>{{this.healing}}</td><td>{{this.martial}}</td><td>{{this.ranged}}</td><td>{{this.magic}}</td><td>{{this.control}}</td><td>{{this.downed}}</td><td>{{this.netDPR}}</td></tr>
           {{/each}}
         </tbody>
       </table>
@@ -194,7 +194,7 @@
     <section class="scls-panel" data-panel="participants">
       <h3>{{sclsLocalize "SCLS.Tab.participants"}}</h3>
       <table class="scls-table">
-        <thead><tr><th>{{sclsLocalize "SCLS.Label.Name"}}</th><th>{{sclsLocalize "SCLS.Label.Side"}}</th><th>{{sclsLocalize "SCLS.Label.Initiative"}}</th><th>{{sclsLocalize "SCLS.Label.NetDamage"}}</th><th>{{sclsLocalize "SCLS.Label.NetDPR"}}</th></tr></thead>
+        <thead><tr><th>{{sclsLocalize "SCLS.Label.Name"}}</th><th>{{sclsLocalize "SCLS.Label.Side"}}</th><th>{{sclsLocalize "SCLS.Label.Initiative"}}</th><th>{{sclsLocalize "SCLS.Label.DamageDealt"}}</th><th>{{sclsLocalize "SCLS.Label.DamageTaken"}}</th><th>{{sclsLocalize "SCLS.Label.NetDPR"}}</th></tr></thead>
         <tbody>
           {{#each participants}}
           <tr>
@@ -202,6 +202,7 @@
             <td><select data-scls-action="setSide" data-combatant-id="{{this.combatantId}}">{{#each this.sideOptions}}<option value="{{this.value}}" {{#if this.selected}}selected{{/if}}>{{this.label}}</option>{{/each}}</select></td>
             <td>{{this.initiative}}</td>
             <td>{{this.stats.damageAppliedNet}}</td>
+            <td>{{this.stats.damageTakenNet}}</td>
             <td>{{this.stats.netDPR}}</td>
           </tr>
           {{/each}}
@@ -275,10 +276,10 @@
         </tbody>
       </table>
       <table class="scls-table">
-        <thead><tr><th>{{sclsLocalize "SCLS.Label.Side"}}</th><th>{{sclsLocalize "SCLS.Label.DamageRolled"}}</th><th>{{sclsLocalize "SCLS.Label.GrossApplied"}}</th><th>{{sclsLocalize "SCLS.Label.NetDamage"}}</th><th>{{sclsLocalize "SCLS.Label.NetDPR"}}</th></tr></thead>
+        <thead><tr><th>{{sclsLocalize "SCLS.Label.Side"}}</th><th>{{sclsLocalize "SCLS.Label.DamageRolled"}}</th><th>{{sclsLocalize "SCLS.Label.GrossApplied"}}</th><th>{{sclsLocalize "SCLS.Label.DamageDealt"}}</th><th>{{sclsLocalize "SCLS.Label.DamageTaken"}}</th><th>{{sclsLocalize "SCLS.Label.NetDPR"}}</th></tr></thead>
         <tbody>
           {{#each sideRows}}
-          <tr><td>{{this.name}}</td><td>{{this.damageRolled}}</td><td>{{this.damageAppliedGross}}</td><td>{{this.damageAppliedNet}}</td><td>{{this.netDPR}}</td></tr>
+          <tr><td>{{this.name}}</td><td>{{this.damageRolled}}</td><td>{{this.damageAppliedGross}}</td><td>{{this.damageAppliedNet}}</td><td>{{this.damageTakenNet}}</td><td>{{this.netDPR}}</td></tr>
           {{/each}}
         </tbody>
       </table>

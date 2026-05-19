@@ -24,7 +24,7 @@ Questions, feedback, and module support are welcome on [Discord](https://discord
 
 ## Features
 
-Version 0.1.0 includes:
+Version 0.1.1 includes:
 
 - Automatic combat logging while a GM runs combat.
 - Live windows for Summary, Impact Meter, Round Log, Statistics, Corrections, Participants, History, and Sharing.

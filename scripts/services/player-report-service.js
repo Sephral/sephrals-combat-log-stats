@@ -47,6 +47,8 @@ export class PlayerReportService {
     const includeTimeline = hasAnyHighlightSection(sections) && [SHARE_MODES.FULL_VISIBLE_RECAP, SHARE_MODES.PUBLIC_REPORT].includes(mode);
     const includeCorrections = false;
 
+    const summary = reportSummary(log, includeEnemyStats, share);
+
     return {
       title: log?.title ?? "Combat Report",
       status: log?.status ?? "unknown",
@@ -55,14 +57,7 @@ export class PlayerReportService {
       endedAt: log?.endedAt ?? null,
       rounds: stats?.summary?.rounds ?? 0,
       participants,
-      summary: {
-        netDamageApplied: stats?.summary?.netDamageApplied ?? 0,
-        grossDamageApplied: stats?.summary?.grossDamageApplied ?? 0,
-        netHealingApplied: stats?.summary?.netHealingApplied ?? 0,
-        partyDPR: stats?.dpr?.partyDPR ?? 0,
-        enemyDPR: includeEnemyStats ? (stats?.dpr?.enemyDPR ?? 0) : null,
-        unclassifiedDeltas: share.includeUnclearEvents ? (stats?.summary?.unclassifiedDeltas ?? 0) : null
-      },
+      summary,
       dpr: includeDPR ? visibleDprRows(log, share, includeEnemyStats) : [],
       timeline: includeTimeline ? visibleTimeline(log, share, includeCorrections) : [],
       highlights: includeTimeline ? buildHighlights(log, share, includeEnemyStats, includeCorrections) : [],
@@ -235,6 +230,19 @@ function visibleDprRows(log, share, includeEnemyStats) {
     }));
 }
 
+function reportSummary(log, includeEnemyStats, share) {
+  const stats = log?.computed ?? {};
+  const friendlySide = (stats?.dpr?.bySide ?? []).find((row) => row.id === SIDES.FRIENDLY || row.side === SIDES.FRIENDLY);
+  return {
+    netDamageApplied: friendlySide?.damageAppliedNet ?? stats?.summary?.netDamageApplied ?? 0,
+    grossDamageApplied: friendlySide?.damageAppliedGross ?? stats?.summary?.grossDamageApplied ?? 0,
+    netHealingApplied: friendlySide?.healingNet ?? stats?.summary?.netHealingApplied ?? 0,
+    partyDPR: stats?.dpr?.partyDPR ?? 0,
+    enemyDPR: includeEnemyStats ? (stats?.dpr?.enemyDPR ?? 0) : null,
+    unclassifiedDeltas: share.includeUnclearEvents ? (stats?.summary?.unclassifiedDeltas ?? 0) : null
+  };
+}
+
 function visibleTimeline(log, share, includeCorrections) {
   return (log?.events ?? [])
     .filter((event) => !event.ignored)
@@ -277,7 +285,7 @@ function contributionLine(participant, participants, dprRows, events) {
   const row = dprRows.get(participant.combatantId) ?? {};
   const ownEvents = events.filter((event) => !event.ignored && event.combatantId === participant.combatantId);
   const damage = Number(row.damageAppliedNet ?? 0) || ownEvents.filter(isDamageEvent).reduce((total, event) => total + eventAmount(event), 0);
-  const healing = ownEvents.filter(isHealingEvent).reduce((total, event) => total + eventAmount(event), 0);
+  const healing = Number(row.healingNet ?? row.healingAppliedNet ?? 0) || ownEvents.filter(isHealingEvent).reduce((total, event) => total + eventAmount(event), 0);
   const martial = ownEvents.filter((event) => isDamageEvent(event) && isMartialAction(event)).length;
   const magic = ownEvents.filter((event) => isDamageEvent(event) && isMagicAction(event)).length;
   const control = ownEvents.filter(isControlEvent).length;
@@ -510,11 +518,17 @@ function uniqueLines(lines) {
 }
 
 function isDamageEvent(event) {
-  return [EVENT_TYPES.DAMAGE_APPLIED, EVENT_TYPES.DAMAGE_MANUAL_ADDED, EVENT_TYPES.ROLL_DAMAGE].includes(event.type) || event.data?.interpretedAs === "damage";
+  if ([EVENT_TYPES.DAMAGE_APPLIED, EVENT_TYPES.DAMAGE_MANUAL_ADDED].includes(event.type)) return true;
+  if ([EVENT_TYPES.RESOURCE_DELTA, EVENT_TYPES.RESOURCE_DELTA_OFFLINE].includes(event.type)) return event.data?.interpretedAs === "damage" && isSourceAttributedResourceDelta(event);
+  return false;
+}
+
+function isSourceAttributedResourceDelta(event) {
+  return event.data?.attribution === "correlatedChatRoll" || Boolean(event.data?.sourceCombatantId || event.data?.sourceActorUuid || event.data?.sourceTokenUuid);
 }
 
 function isHealingEvent(event) {
-  return [EVENT_TYPES.HEALING_APPLIED, EVENT_TYPES.HEALING_MANUAL_ADDED, EVENT_TYPES.ROLL_HEALING].includes(event.type) || event.data?.interpretedAs === "healing";
+  return [EVENT_TYPES.HEALING_APPLIED, EVENT_TYPES.HEALING_MANUAL_ADDED].includes(event.type) || event.data?.interpretedAs === "healing";
 }
 
 function isControlEvent(event) {
@@ -591,4 +605,4 @@ function markdownToHtml(markdown) {
   }).join("\n");
 }
 
-export const __test__ = { normalizeReportSections, visibleParticipants, visibleDprRows, visibleTimeline, isCorrectionEvent };
+export const __test__ = { normalizeReportSections, visibleParticipants, visibleDprRows, visibleTimeline, reportSummary, isCorrectionEvent };

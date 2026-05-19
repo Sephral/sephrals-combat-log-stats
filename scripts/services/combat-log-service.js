@@ -5,16 +5,16 @@ import { getSetting } from "../settings.js";
 import { cloneData, debugLog, getProperty, isoNow } from "../utils.js";
 import { CombatEventLedger } from "./event-ledger.js";
 import { CombatLogPersistenceService } from "./persistence-service.js";
-import { CombatStatsService } from "./stats-service.js";
-import { CorrelationService } from "./correlation-service.js";
-import { PlayerReportService } from "./player-report-service.js";
+import { CombatStatsService } from "./stats-service.js?v=20260519i";
+import { CorrelationService } from "./correlation-service.js?v=20260519i";
+import { PlayerReportService } from "./player-report-service.js?v=20260519i";
 
 export class CombatLogService {
   constructor() {
     this.persistence = new CombatLogPersistenceService();
     this.activeLogs = new Map();
     this.actorSnapshots = new Map();
-    this.correlation = new CorrelationService({ windowMs: getSetting(SETTINGS.RESOURCE_DELTA_WINDOW_MS, 3000) });
+    this.correlation = new CorrelationService({ windowMs: getSetting(SETTINGS.RESOURCE_DELTA_WINDOW_MS, 60000) });
     this.playerReports = new PlayerReportService();
   }
 

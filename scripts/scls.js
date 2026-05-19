@@ -1,6 +1,6 @@
 import { EVENT_TYPES, HOOKS, MODULE_ID, SETTINGS } from "./constants.js";
-import { CombatLogApp } from "./apps/combat-log-app.js";
-import { CombatLogService } from "./services/combat-log-service.js?v=20260519f";
+import { CombatLogApp } from "./apps/combat-log-app.js?v=20260519i";
+import { CombatLogService } from "./services/combat-log-service.js?v=20260519i";
 import { getSetting, registerSettings } from "./settings.js";
 import { isGM, loadModuleTranslations, localize, registerTemplateHelpers } from "./utils.js";
 

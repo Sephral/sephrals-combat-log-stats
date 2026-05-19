@@ -542,6 +542,10 @@
   color: var(--scls-heal);
 }
 
+.scls-impact-badge--taken i {
+  color: var(--scls-warn);
+}
+
 .scls-impact-badge--control i {
   color: var(--scls-accent);
 }
