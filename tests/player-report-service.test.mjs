@@ -20,9 +20,13 @@ function reportLog(overrides = {}) {
       dpr: {
         partyDPR: 10,
         enemyDPR: 4,
+        bySide: [
+          { id: SIDES.FRIENDLY, side: SIDES.FRIENDLY, damageAppliedNet: 20, damageAppliedGross: 20, healingNet: 5 },
+          { id: SIDES.HOSTILE, side: SIDES.HOSTILE, damageAppliedNet: 8, damageAppliedGross: 8, healingNet: 0 }
+        ],
         byCombatant: [
-          { id: "hero", name: "Hero", side: SIDES.FRIENDLY, damageAppliedNet: 20, netDPR: 10, unclearEvents: 0 },
-          { id: "healer", name: "Healer", side: SIDES.FRIENDLY, damageAppliedNet: 0, netDPR: 0, unclearEvents: 0 },
+          { id: "hero", name: "Hero", side: SIDES.FRIENDLY, damageAppliedNet: 20, healingNet: 0, netDPR: 10, unclearEvents: 0 },
+          { id: "healer", name: "Healer", side: SIDES.FRIENDLY, damageAppliedNet: 0, healingNet: 5, netDPR: 0, unclearEvents: 0 },
           { id: "controller", name: "Controller", side: SIDES.FRIENDLY, damageAppliedNet: 0, netDPR: 0, unclearEvents: 0 },
           { id: "foe", name: "Secret Foe", side: SIDES.HOSTILE, damageAppliedNet: 8, netDPR: 4, unclearEvents: 1 }
         ]
@@ -92,6 +96,25 @@ test("player report renders a recap instead of raw participants and timeline", (
   assert.doesNotMatch(markdown, /## Timeline/);
 });
 
+test("player report recap uses party totals instead of all-side totals", () => {
+  const log = reportLog();
+  log.computed.summary.netDamageApplied = 77;
+  log.computed.summary.grossDamageApplied = 77;
+  log.computed.dpr.partyDPR = 28;
+  log.computed.dpr.enemyDPR = 10.5;
+  log.computed.dpr.bySide = [
+    { id: SIDES.FRIENDLY, side: SIDES.FRIENDLY, damageAppliedNet: 56, damageAppliedGross: 56, healingNet: 5 },
+    { id: SIDES.HOSTILE, side: SIDES.HOSTILE, damageAppliedNet: 21, damageAppliedGross: 21, healingNet: 0 }
+  ];
+
+  const markdown = new PlayerReportService().renderMarkdown(new PlayerReportService().buildReport(log));
+
+  assert.match(markdown, /The party dealt 56 total damage over 2 rounds/);
+  assert.match(markdown, /Party pace: 28 damage per round/);
+  assert.match(markdown, /Enemy pressure: 10\.5 damage per round/);
+  assert.doesNotMatch(markdown, /The party dealt 77 total damage/);
+});
+
 test("player report mentions each friendly player contribution", () => {
   const service = new PlayerReportService();
   const markdown = service.renderMarkdown(service.buildReport(reportLog()));
@@ -101,6 +124,38 @@ test("player report mentions each friendly player contribution", () => {
   assert.match(markdown, /Controller:/);
   assert.match(markdown, /5 healing/);
   assert.match(markdown, /1 control plays/);
+});
+
+test("player report does not double count healing rolls and applications", () => {
+  const log = reportLog();
+  log.events.push({ id: "heal-roll", type: EVENT_TYPES.ROLL_HEALING, round: 1, combatantId: "healer", confidence: CONFIDENCE.SAFE, visibility: VISIBILITY.PUBLIC, data: { total: 5, actionName: "Healing Word", targetCombatantId: "hero", targetName: "Hero" } });
+
+  const markdown = new PlayerReportService().renderMarkdown(new PlayerReportService().buildReport(log));
+
+  assert.match(markdown, /Healer: 5 healing/);
+  assert.doesNotMatch(markdown, /Healer: 10 healing/);
+  assert.equal((markdown.match(/restored 5 HP/g) ?? []).length, 1);
+});
+
+test("player report does not credit passive damage taken as hostile damage dealt", () => {
+  const log = reportLog();
+  log.computed.summary.netDamageApplied = 58;
+  log.computed.dpr.partyDPR = 14.5;
+  log.computed.dpr.enemyDPR = 0;
+  log.computed.dpr.byCombatant = [
+    { id: "hero", name: "Hero", side: SIDES.FRIENDLY, damageAppliedNet: 58, damageTakenNet: 0, netDPR: 14.5, unclearEvents: 0 },
+    { id: "foe", name: "Secret Foe", side: SIDES.HOSTILE, damageAppliedNet: 0, damageTakenNet: 58, netDPR: 0, unclearEvents: 0 }
+  ];
+  log.events = [
+    { id: "taken", type: EVENT_TYPES.RESOURCE_DELTA, round: 1, combatantId: "foe", confidence: CONFIDENCE.PROBABLE, visibility: VISIBILITY.PUBLIC, data: { delta: -58, interpretedAs: "damage" } }
+  ];
+
+  const markdown = new PlayerReportService().renderMarkdown(new PlayerReportService().buildReport(log));
+
+  assert.match(markdown, /Hero: 58 damage/);
+  assert.match(markdown, /Party pace: 14\.5 damage per round/);
+  assert.match(markdown, /Enemy pressure: 0 damage per round/);
+  assert.doesNotMatch(markdown, /Enemy 1: 58 damage/);
 });
 
 test("player report keeps GM-only manual corrections hidden from private roll sharing", () => {

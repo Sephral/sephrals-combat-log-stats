@@ -11,7 +11,7 @@ const SETTING_DEFINITIONS = [
   [SETTINGS.TRACK_ACTIVE_EFFECTS, { scope: "world", config: false, type: Boolean, default: true }],
   [SETTINGS.TRACK_TEMPLATES, { scope: "world", config: false, type: Boolean, default: true }],
   [SETTINGS.TRACK_TOKEN_UPDATES, { scope: "world", config: false, type: Boolean, default: true }],
-  [SETTINGS.RESOURCE_DELTA_WINDOW_MS, { scope: "world", config: false, type: Number, default: 3000 }],
+  [SETTINGS.RESOURCE_DELTA_WINDOW_MS, { scope: "world", config: false, type: Number, default: 60000 }],
   [SETTINGS.INCLUDE_UNCLEAR_DELTAS_IN_STATS, { scope: "world", config: true, type: Boolean, default: false }],
   [SETTINGS.DEFAULT_DPR_METHOD, { scope: "world", config: false, type: String, choices: { [DPR_METHODS.ROLLED]: "Rolled", [DPR_METHODS.APPLIED_GROSS]: "Applied Gross", [DPR_METHODS.APPLIED_NET]: "Applied Net" }, default: DPR_METHODS.APPLIED_NET }],
   [SETTINGS.ENABLE_PLAYER_SHARING, { scope: "world", config: false, type: Boolean, default: true }],

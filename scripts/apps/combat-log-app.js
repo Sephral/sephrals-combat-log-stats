@@ -433,7 +433,8 @@ function dprRows(log) {
 const DPR_COLUMNS = Object.freeze([
   { key: "name", labelKey: "SCLS.Label.Combatant", type: "string" },
   { key: "side", labelKey: "SCLS.Label.Side", type: "string" },
-  { key: "damageAppliedNet", labelKey: "SCLS.Label.NetDamage", type: "number" },
+  { key: "damageAppliedNet", labelKey: "SCLS.Label.DamageDealt", type: "number" },
+  { key: "damageTakenNet", labelKey: "SCLS.Label.DamageTaken", type: "number" },
   { key: "healing", labelKey: "SCLS.Label.Healing", type: "number" },
   { key: "martial", labelKey: "SCLS.Label.Martial", type: "number" },
   { key: "ranged", labelKey: "SCLS.Label.Ranged", type: "number" },
@@ -509,14 +510,14 @@ function disciplineTotals(log, participants) {
   for (const event of log.events ?? []) {
     if (event.ignored) continue;
     const amount = eventAmount(event);
-    if (isDamageEvent(event)) totals.damage += amount;
+    if (isDamageDealtEvent(event)) totals.damage += amount;
     if (isHealingEvent(event)) totals.healing += amount;
-    if (isMartialAction(event)) totals.martial += 1;
-    if (isRangedAction(event)) totals.ranged += 1;
-    if (isMagicAction(event)) totals.magic += 1;
+    if (isDamageDealtEvent(event) && isMartialAction(event)) totals.martial += 1;
+    if (isDamageDealtEvent(event) && isRangedAction(event)) totals.ranged += 1;
+    if (isDamageDealtEvent(event) && isMagicAction(event)) totals.magic += 1;
     if (isControlEvent(event)) totals.control += 1;
     if (targetFellToZero(event) && targetForEvent(event, participants)?.side === SIDES.FRIENDLY) totals.downed += 1;
-    if (isDamageEvent(event) || isHealingEvent(event) || isControlEvent(event)) totals.actionCount += 1;
+    if (isDamageDealtEvent(event) || isHealingEvent(event) || isControlEvent(event)) totals.actionCount += 1;
   }
   return totals;
 }
@@ -538,7 +539,7 @@ function pressureRows(log) {
 function topActions(log, participants) {
   const actions = new Map();
   for (const event of log.events ?? []) {
-    if (event.ignored || !(isDamageEvent(event) || isHealingEvent(event) || isControlEvent(event))) continue;
+    if (event.ignored || !(isDamageDealtEvent(event) || isHealingEvent(event) || isControlEvent(event))) continue;
     const name = actionDetail(event) || event.data?.name || event.type;
     const kind = actionKind(event);
     const key = `${kind}:${normalizeLabel(name)}`;
@@ -559,13 +560,14 @@ function topActions(log, participants) {
 function actionKind(event) {
   if (isHealingEvent(event)) return "healing";
   if (isControlEvent(event)) return "control";
-  if (isDamageEvent(event)) return "damage";
+  if (isDamageDealtEvent(event)) return "damage";
   return "utility";
 }
 
 function impactMetrics(row) {
   const metrics = [
-    impactMetric("damage", "fa-solid fa-burst", localize("SCLS.Label.NetDamage"), row.damageAppliedNet),
+    impactMetric("damage", "fa-solid fa-burst", localize("SCLS.Label.DamageDealt"), row.damageAppliedNet),
+    impactMetric("taken", "fa-solid fa-shield-heart", localize("SCLS.Label.DamageTaken"), row.damageTakenNet),
     impactMetric("healing", "fa-solid fa-heart-pulse", localize("SCLS.Label.Healing"), row.healing),
     impactMetric("control", "fa-solid fa-hand-sparkles", localize("SCLS.Label.Control"), row.control),
     impactMetric("downed", "fa-solid fa-skull", localize("SCLS.Label.Downed"), row.downed)
@@ -598,11 +600,11 @@ function disciplineStatsByCombatant(log, participants) {
     const amount = eventAmount(event);
     if (source?.combatantId) {
       const row = stats.get(source.combatantId) ?? emptyDisciplineStats();
-      if (isDamageEvent(event)) row.damage += amount;
+      if (isDamageDealtEvent(event)) row.damage += amount;
       if (isHealingEvent(event)) row.healing += amount;
-      if (isMartialAction(event)) row.martial += 1;
-      if (isRangedAction(event)) row.ranged += 1;
-      if (isMagicAction(event)) row.magic += 1;
+      if (isDamageDealtEvent(event) && isMartialAction(event)) row.martial += 1;
+      if (isDamageDealtEvent(event) && isRangedAction(event)) row.ranged += 1;
+      if (isDamageDealtEvent(event) && isMagicAction(event)) row.magic += 1;
       if (isControlEvent(event)) row.control += 1;
       stats.set(source.combatantId, row);
     }
@@ -744,6 +746,7 @@ function roundAction(event, participants) {
 function resourceDeltaAction(event, source, targetName, side, actor, amount) {
   switch (event.data?.interpretedAs) {
     case RESOURCE_INTERPRETATIONS.DAMAGE:
+      if (!isSourceAttributedResourceDelta(event)) return actionRow(event, "taken", side, actor, actor, amount, localize("SCLS.Protocol.DamageTaken"));
       return actionRow(event, "damage", side, actor, targetName || source?.name || "-", amount, localize("SCLS.Protocol.Damage"));
     case RESOURCE_INTERPRETATIONS.HEALING:
       return actionRow(event, "healing", side, actor, targetName || source?.name || "-", amount, localize("SCLS.Protocol.Healing"));
@@ -796,6 +799,16 @@ function actionDetail(event) {
 
 function isDamageEvent(event) {
   return [EVENT_TYPES.DAMAGE_APPLIED, EVENT_TYPES.DAMAGE_MANUAL_ADDED, EVENT_TYPES.ROLL_DAMAGE].includes(event.type) || event.data?.interpretedAs === RESOURCE_INTERPRETATIONS.DAMAGE;
+}
+
+function isDamageDealtEvent(event) {
+  if ([EVENT_TYPES.DAMAGE_APPLIED, EVENT_TYPES.DAMAGE_MANUAL_ADDED].includes(event.type)) return true;
+  if ([EVENT_TYPES.RESOURCE_DELTA, EVENT_TYPES.RESOURCE_DELTA_OFFLINE].includes(event.type)) return event.data?.interpretedAs === RESOURCE_INTERPRETATIONS.DAMAGE && isSourceAttributedResourceDelta(event);
+  return false;
+}
+
+function isSourceAttributedResourceDelta(event) {
+  return event.data?.attribution === "correlatedChatRoll" || Boolean(event.data?.sourceCombatantId || event.data?.sourceActorUuid || event.data?.sourceTokenUuid);
 }
 
 function isHealingEvent(event) {

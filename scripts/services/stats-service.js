@@ -149,7 +149,7 @@ export class CombatStatsService {
           break;
         case EVENT_TYPES.RESOURCE_DELTA:
         case EVENT_TYPES.RESOURCE_DELTA_OFFLINE:
-          applyResourceDelta(event, summary, bucket);
+          applyResourceDelta(event, summary, bucket, targetBucket);
           if (targetBucket && targetBucket.id !== bucket.id && event.data?.interpretedAs === RESOURCE_INTERPRETATIONS.DAMAGE) addDamage(targetBucket, amount, { target: true });
           break;
         default:
@@ -217,13 +217,14 @@ function targetBucketForEvent(log, byCombatant, event, sourceBucketId) {
   return bucket;
 }
 
-function applyResourceDelta(event, summary, bucket) {
+function applyResourceDelta(event, summary, bucket, targetBucket = null) {
   const amount = eventAmount(event);
   switch (event.data?.interpretedAs) {
     case RESOURCE_INTERPRETATIONS.DAMAGE:
       summary.grossDamageApplied += amount;
       summary.netDamageApplied += amount;
-      addDamage(bucket, amount);
+      if (isSourceAttributedResourceDelta(event)) addDamage(bucket, amount);
+      else addDamage(targetBucket ?? bucket, amount, { target: true });
       break;
     case RESOURCE_INTERPRETATIONS.HEALING:
       summary.grossHealingApplied += amount;
@@ -262,6 +263,10 @@ function applyResourceDelta(event, summary, bucket) {
       bucket.unclearEvents += 1;
       break;
   }
+}
+
+function isSourceAttributedResourceDelta(event) {
+  return event.data?.attribution === "correlatedChatRoll" || Boolean(event.data?.sourceCombatantId || event.data?.sourceActorUuid || event.data?.sourceTokenUuid);
 }
 
 function mergeBucket(target, source) {

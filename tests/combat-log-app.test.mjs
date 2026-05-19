@@ -130,12 +130,12 @@ test("combat metrics summarize contributions, disciplines, and top actions", () 
     computed: {
       dpr: {
         byCombatant: [
-          { id: "hero", name: "Hero", side: SIDES.FRIENDLY, damageAppliedNet: 22, netDPR: 11 },
-          { id: "foe", name: "Foe", side: SIDES.HOSTILE, damageAppliedNet: 9, netDPR: 4.5 }
+          { id: "hero", name: "Hero", side: SIDES.FRIENDLY, damageAppliedNet: 22, damageTakenNet: 9, netDPR: 11 },
+          { id: "foe", name: "Foe", side: SIDES.HOSTILE, damageAppliedNet: 9, damageTakenNet: 22, netDPR: 4.5 }
         ],
         bySide: [
-          { id: SIDES.FRIENDLY, name: SIDES.FRIENDLY, damageAppliedNet: 22, damageRolled: 0, damageAppliedGross: 22, netDPR: 11 },
-          { id: SIDES.HOSTILE, name: SIDES.HOSTILE, damageAppliedNet: 9, damageRolled: 0, damageAppliedGross: 9, netDPR: 4.5 }
+          { id: SIDES.FRIENDLY, name: SIDES.FRIENDLY, damageAppliedNet: 22, damageTakenNet: 9, damageRolled: 0, damageAppliedGross: 22, netDPR: 11 },
+          { id: SIDES.HOSTILE, name: SIDES.HOSTILE, damageAppliedNet: 9, damageTakenNet: 22, damageRolled: 0, damageAppliedGross: 9, netDPR: 4.5 }
         ]
       }
     }
@@ -143,7 +143,7 @@ test("combat metrics summarize contributions, disciplines, and top actions", () 
 
   assert.equal(result.contributionRows[0].name, "Hero");
   assert.equal(result.contributionRows[0].damagePercent, 100);
-  assert.deepEqual(result.contributionRows[0].impactMetrics.map((metric) => metric.type), ["damage", "healing", "control", "downed"]);
+  assert.deepEqual(result.contributionRows[0].impactMetrics.map((metric) => metric.type), ["damage", "taken", "healing", "control", "downed"]);
   assert.equal(result.totals.healing, 5);
   assert.equal(result.totals.control, 1);
   assert.equal(result.totals.downed, 1);

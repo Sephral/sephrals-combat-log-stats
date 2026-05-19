@@ -36,14 +36,41 @@ test("unclear resource deltas are excluded by default", () => {
   assert.equal(result.dpr.partyDPR, 0);
 });
 
-test("manual resource delta classification contributes to net damage", () => {
+test("manual resource delta classification records damage taken without inventing a source", () => {
   const result = CombatStatsService.compute(baseLog([
     { type: EVENT_TYPES.RESOURCE_DELTA, combatantId: "c1", confidence: CONFIDENCE.MANUAL, data: { delta: -12, interpretedAs: RESOURCE_INTERPRETATIONS.DAMAGE } }
   ]));
 
   assert.equal(result.summary.grossDamageApplied, 12);
   assert.equal(result.summary.netDamageApplied, 12);
-  assert.equal(result.dpr.partyDPR, 12);
+  assert.equal(result.dpr.partyDPR, 0);
+  assert.equal(result.dpr.byCombatant.find((entry) => entry.id === "c1")?.damageAppliedNet, 0);
+  assert.equal(result.dpr.byCombatant.find((entry) => entry.id === "c1")?.damageTakenNet, 12);
+});
+
+test("source-attributed resource delta records dealt and taken damage separately", () => {
+  const result = CombatStatsService.compute({
+    participants: [
+      { combatantId: "hero", actorUuid: "Actor.hero", name: "Hero", side: "friendly" },
+      { combatantId: "foe", actorUuid: "Actor.foe", name: "Foe", side: "hostile" }
+    ],
+    rounds: 4,
+    sessionSegments: [{ startedAt: "2026-05-17T10:00:00.000Z", endedAt: "2026-05-17T10:10:00.000Z" }],
+    events: [
+      { type: EVENT_TYPES.RESOURCE_DELTA, combatantId: "hero", actorUuid: "Actor.hero", confidence: CONFIDENCE.PROBABLE, data: { delta: -58, interpretedAs: RESOURCE_INTERPRETATIONS.DAMAGE, attribution: "correlatedChatRoll", targetCombatantId: "foe", targetActorUuid: "Actor.foe" } }
+    ],
+    computed: { summary: { rounds: 4 } }
+  });
+
+  const hero = result.dpr.byCombatant.find((entry) => entry.id === "hero");
+  const foe = result.dpr.byCombatant.find((entry) => entry.id === "foe");
+  assert.equal(result.summary.netDamageApplied, 58);
+  assert.equal(result.dpr.partyDPR, 14.5);
+  assert.equal(result.dpr.enemyDPR, 0);
+  assert.equal(hero.damageAppliedNet, 58);
+  assert.equal(hero.damageTakenNet, 0);
+  assert.equal(foe.damageAppliedNet, 0);
+  assert.equal(foe.damageTakenNet, 58);
 });
 
 test("manual damage and healing adjustments affect net totals", () => {
