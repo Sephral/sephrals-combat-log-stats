@@ -225,7 +225,7 @@ export class CombatLogService {
       turn: combat?.turn ?? null,
       actorUuid: message?.speaker?.actor ? `Actor.${message.speaker.actor}` : "",
       tokenUuid: message?.speaker?.token ? `Scene.${message.speaker.scene}.Token.${message.speaker.token}` : "",
-      userId: message?.user?.id ?? message?._source?.user ?? "",
+      userId: messageAuthorId(message),
       visibility: message?.whisper?.length ? "gm" : "public",
       source: { kind: SOURCE_KINDS.CHAT_MESSAGE, id: message.id },
       confidence: CONFIDENCE.SAFE,
@@ -251,7 +251,7 @@ export class CombatLogService {
         combatantId: sourceParticipant?.combatantId ?? "",
         actorUuid: message?.speaker?.actor ? `Actor.${message.speaker.actor}` : "",
         tokenUuid: message?.speaker?.token ? `Scene.${message.speaker.scene}.Token.${message.speaker.token}` : "",
-        userId: message?.user?.id ?? message?._source?.user ?? "",
+        userId: messageAuthorId(message),
         visibility: message?.whisper?.length ? "gm" : "public",
         source: { kind: SOURCE_KINDS.ROLL, id: message.id },
         confidence: classification.confidence,
@@ -281,7 +281,7 @@ export class CombatLogService {
         combatantId: sourceParticipant?.combatantId ?? target?.combatantId ?? "",
         actorUuid: sourceParticipant?.actorUuid ?? "",
         tokenUuid: sourceParticipant?.tokenUuid ?? "",
-        userId: message?.user?.id ?? message?._source?.user ?? "",
+        userId: messageAuthorId(message),
         visibility: message?.whisper?.length ? "gm" : "public",
         source: { kind: SOURCE_KINDS.CHAT_MESSAGE, id: `${message.id}:application:${events.length + 1}` },
         confidence: application.confidence ?? CONFIDENCE.PROBABLE,
@@ -514,6 +514,11 @@ function prepareAutoReportSharing(log) {
     shareUpdatedAt: isoNow()
   };
   if (!log.shareSettings.shareStartedAt) log.shareSettings.shareStartedAt = log.shareSettings.shareUpdatedAt;
+}
+
+// ChatMessage#user was renamed to #author in v12. The old name logs a deprecation in v13 and is gone in v14.
+function messageAuthorId(message) {
+  return message?.author?.id ?? message?._source?.author ?? "";
 }
 
 function actorDataSnapshot(actor) {

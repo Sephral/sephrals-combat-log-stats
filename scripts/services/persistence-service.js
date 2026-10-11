@@ -3,6 +3,7 @@ import { getSetting, setSetting } from "../settings.js";
 import { cloneData, debugLog, isoNow } from "../utils.js";
 
 const FILE_UPLOAD_TIMEOUT_MS = 10000;
+const STORE_FILE_NAME = "combat-logs.json";
 
 export class CombatLogPersistenceService {
   constructor() {
@@ -12,14 +13,23 @@ export class CombatLogPersistenceService {
     this.storeCache = null;
     this.writeQueue = Promise.resolve();
     this.fileUploadTimeoutMs = FILE_UPLOAD_TIMEOUT_MS;
+    this.storeFileUrl = null;
+    this.forgeDirectoryEnsured = false;
   }
 
   storageBasePath() {
-    return `worlds/${game?.world?.id ?? "world"}/data/${MODULE_ID}`;
+    const worldId = game?.world?.id ?? "world";
+    // The Forge has no writable world folder; the store lives in the user's Assets Library there.
+    if (isTheForge()) return `${MODULE_ID}/${worldId}`;
+    return `worlds/${worldId}/data/${MODULE_ID}`;
+  }
+
+  storageSource() {
+    return isTheForge() ? "forgevtt" : "data";
   }
 
   storeFilePath() {
-    return `${this.storageBasePath()}/combat-logs.json`;
+    return `${this.storageBasePath()}/${STORE_FILE_NAME}`;
   }
 
   async loadStoredIndex() {
@@ -29,7 +39,7 @@ export class CombatLogPersistenceService {
 
   async loadIndex() {
     const store = await this.loadStore();
-    const storeEntries = store.logs.map((log) => indexEntryForLog(log, this.storeFilePath()));
+    const storeEntries = store.logs.map((log) => indexEntryForLog(log, this.storeFilePath(), null, this.storeFileUrl));
     return { schemaVersion: SCHEMA_VERSION, logs: storeEntries };
   }
 
@@ -39,8 +49,8 @@ export class CombatLogPersistenceService {
 
   async loadStore() {
     if (this.storeCache) return cloneData(this.storeCache);
-    const fileStore = await this.tryLoadStoreFromFile();
     const index = await this.loadStoredIndex();
+    const fileStore = await this.tryLoadStoreFromFile(index);
     const inlineStore = { schemaVersion: SCHEMA_VERSION, updatedAt: isoNow(), logs: (index.logs ?? []).map((entry) => entry.inlineLog).filter((log) => log?.id) };
     this.storeCache = normalizeStore(fileStore ?? inlineStore);
     return cloneData(this.storeCache);
@@ -50,7 +60,7 @@ export class CombatLogPersistenceService {
     const normalized = normalizeStore({ ...store, updatedAt: isoNow() });
     this.storeCache = cloneData(normalized);
     const persistedToFile = await this.tryPersistStoreToFile(normalized);
-    const index = { schemaVersion: SCHEMA_VERSION, logs: normalized.logs.map((log) => indexEntryForLog(log, persistedToFile ? this.storeFilePath() : null, persistedToFile ? null : log)) };
+    const index = { schemaVersion: SCHEMA_VERSION, logs: normalized.logs.map((log) => indexEntryForLog(log, persistedToFile ? this.storeFilePath() : null, persistedToFile ? null : log, persistedToFile ? this.storeFileUrl : null)) };
     await this.saveIndex(index);
     return persistedToFile;
   }
@@ -140,8 +150,12 @@ export class CombatLogPersistenceService {
     }
     try {
       await this.ensureDirectories();
-      const file = new File([data], "combat-logs.json", { type: "application/json" });
-      await withTimeout(FilePicker.upload("data", this.storageBasePath(), file, {}, { notify: false }), this.fileUploadTimeoutMs, "Timed out while uploading combat log store");
+      const file = new File([data], STORE_FILE_NAME, { type: "application/json" });
+      const response = await withTimeout(FilePicker.upload(this.storageSource(), this.storageBasePath(), file, {}, { notify: false }), this.fileUploadTimeoutMs, "Timed out while uploading combat log store");
+      // FilePicker.upload reports server errors by returning false instead of throwing.
+      if (!response?.path) throw new Error("The upload returned no file path");
+      // The Forge returns the absolute Assets Library URL; the index keeps it to read the store back.
+      if (isTheForge()) this.storeFileUrl = response.path;
       return true;
     } catch (error) {
       this.filePersistenceDisabled = true;
@@ -150,22 +164,44 @@ export class CombatLogPersistenceService {
     }
   }
 
-  async tryLoadStoreFromFile() {
-    const loaded = await this.tryLoadFromFile(this.storeFilePath());
-    if (!loaded) return null;
-    return normalizeStore(loaded);
+  async tryLoadStoreFromFile(index = null) {
+    for (const candidate of await this.storeFileCandidates(index)) {
+      const loaded = await this.tryLoadFromFile(candidate);
+      if (loaded) return normalizeStore(loaded);
+    }
+    return null;
+  }
+
+  async storeFileCandidates(index = null) {
+    const entries = Array.isArray(index?.logs) ? index.logs : [];
+    // The index records where the last save went. Without file entries the logs are inline (always on v13),
+    // and a store file left from an earlier save would be stale, so it is not requested at all.
+    if (!entries.some((entry) => entry?.filePath || entry?.fileUrl)) return [];
+    if (!isTheForge()) return [this.storeFilePath()];
+    // On The Forge, prefer the URLs returned by earlier uploads. Older entries only know a relative path
+    // (written with source "data", which The Forge also keeps in the Assets Library): try its Assets Library URL, then the path.
+    const candidates = entries.map((entry) => entry?.fileUrl).filter(Boolean);
+    const relativePaths = new Set(entries.map((entry) => entry?.filePath).filter((filePath) => filePath && !isAbsoluteUrl(filePath)));
+    for (const filePath of relativePaths) {
+      const url = await forgeAssetUrl(filePath);
+      if (url) candidates.push(url);
+      candidates.push(filePath);
+    }
+    return [...new Set(candidates)];
   }
 
   async tryLoadFromFile(filePath) {
     if (!filePath) return null;
     if (this.missingFilePaths.has(filePath)) return null;
     try {
-      const response = await fetch(filePath.startsWith("/") ? filePath : `/${filePath}`);
+      const response = isAbsoluteUrl(filePath)
+        ? await fetch(filePath, { cache: "no-store" })
+        : await fetch(filePath.startsWith("/") ? filePath : `/${filePath}`);
       if (!response.ok) {
         if ([403, 404].includes(response.status)) this.missingFilePaths.add(filePath);
         return null;
       }
-      return response.json();
+      return await response.json();
     } catch (error) {
       debugLog("Failed to load combat log file", filePath, error);
       return null;
@@ -175,6 +211,17 @@ export class CombatLogPersistenceService {
   async ensureDirectories() {
     const FilePicker = foundry?.applications?.apps?.FilePicker?.implementation ?? globalThis.FilePicker;
     if (!FilePicker?.createDirectory) return;
+    if (isTheForge()) {
+      // The Forge creates all nested folders in one call, and its upload creates a missing target folder too.
+      if (this.forgeDirectoryEnsured) return;
+      this.forgeDirectoryEnsured = true;
+      try {
+        await FilePicker.createDirectory("forgevtt", this.storageBasePath(), { notify: false });
+      } catch {
+        // Existing folders or a failed call are fine; the upload result decides.
+      }
+      return;
+    }
     let current = `worlds/${game?.world?.id ?? "world"}/data`;
     for (const part of [MODULE_ID]) {
       const next = `${current}/${part}`;
@@ -215,12 +262,15 @@ export class CombatLogPersistenceService {
       }
     }
     if (retained.length !== (index.logs ?? []).length) {
+      const pruned = { ...index, logs: retained };
+      // saveStore rewrites the index setting itself (file path and URL, or inline payloads). Writing the
+      // display entries afterwards would drop the stored Forge URL and the inline payloads.
       if (removedIds.size && this.storeCache) {
         const store = normalizeStore({ ...this.storeCache, logs: this.storeCache.logs.filter((log) => !removedIds.has(log.id)) });
         await this.saveStore(store);
+      } else {
+        await this.saveIndex(pruned);
       }
-      const pruned = { ...index, logs: retained };
-      await this.saveIndex(pruned);
       return pruned;
     }
     return index;
@@ -236,6 +286,30 @@ function withTimeout(promise, timeoutMs, message) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
 }
 
+// The Forge may declare ForgeVTT/ForgeAPI as top-level classes of a classic script: global bindings that are
+// not globalThis properties, so they are read by name behind typeof guards.
+function isTheForge() {
+  return typeof ForgeVTT !== "undefined" && ForgeVTT?.usingTheForge === true;
+}
+
+// Absolute Assets Library URL of a relative path on The Forge, or null when it cannot be determined.
+async function forgeAssetUrl(relativePath) {
+  const prefix = typeof ForgeVTT !== "undefined" ? ForgeVTT?.ASSETS_LIBRARY_URL_PREFIX : null;
+  if (!prefix || typeof ForgeAPI === "undefined" || typeof ForgeAPI?.getUserId !== "function") return null;
+  try {
+    const userId = await ForgeAPI.getUserId();
+    if (!userId) return null;
+    return `${prefix}${userId}/${String(relativePath).replace(/^\/+/, "")}`;
+  } catch (error) {
+    debugLog("Failed to resolve The Forge asset URL", relativePath, error);
+    return null;
+  }
+}
+
+function isAbsoluteUrl(path) {
+  return /^https?:\/\//i.test(String(path ?? ""));
+}
+
 function supportsClientFileUpload() {
   const generation = Number(game?.release?.generation ?? String(game?.version ?? "").split(".")[0]);
   return !Number.isFinite(generation) || generation >= 14;
@@ -249,7 +323,7 @@ function normalizeStore(store) {
   };
 }
 
-function indexEntryForLog(log, filePath = null, inlineLog = null) {
+function indexEntryForLog(log, filePath = null, inlineLog = null, fileUrl = null) {
   const entry = {
     schemaVersion: SCHEMA_VERSION,
     moduleVersion: log.moduleVersion,
@@ -269,6 +343,7 @@ function indexEntryForLog(log, filePath = null, inlineLog = null) {
     shareMode: log.shareSettings?.shareMode ?? "gmOnly",
     hasPlayerSummary: Boolean(log.shareSettings?.allowPlayersToOpenReport)
   };
+  if (fileUrl) entry.fileUrl = fileUrl;
   if (inlineLog) entry.inlineLog = cloneData(inlineLog);
   return entry;
 }

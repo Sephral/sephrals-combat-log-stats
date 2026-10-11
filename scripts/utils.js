@@ -48,7 +48,7 @@ export function formatDateTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
   try {
-    return new Intl.DateTimeFormat(activeLanguage(), { dateStyle: "medium", timeStyle: "short" }).format(date);
+    return new Intl.DateTimeFormat(activeLocale(), { dateStyle: "medium", timeStyle: "short" }).format(date);
   } catch {
     return date.toLocaleString();
   }
@@ -92,14 +92,25 @@ export async function loadModuleTranslations() {
 }
 
 export function localize(key) {
-  const language = activeLanguage();
-  return moduleTranslations?.[language]?.[key] ?? game?.i18n?.localize?.(key) ?? key;
+  // Only an explicit language choice overrides with the bundled file. "Follow Foundry" reads game.i18n alone,
+  // which already holds this module's strings for the Foundry language, English fallback and community translations.
+  const language = explicitLanguage();
+  const override = language ? moduleTranslations?.[language]?.[key] : undefined;
+  return override ?? game?.i18n?.localize?.(key) ?? key;
 }
 
 export function activeLanguage() {
+  return explicitLanguage() ?? (String(game?.i18n?.lang ?? "en").toLowerCase().startsWith("de") ? LANGUAGE_MODES.DE : LANGUAGE_MODES.EN);
+}
+
+// Locale for dates and numbers: the explicit choice, otherwise the Foundry language as is (e.g. "fr").
+export function activeLocale() {
+  return explicitLanguage() ?? String(game?.i18n?.lang || "en");
+}
+
+function explicitLanguage() {
   const configured = selectedLanguageMode();
-  if (configured === LANGUAGE_MODES.DE || configured === LANGUAGE_MODES.EN) return configured;
-  return String(game?.i18n?.lang ?? "en").toLowerCase().startsWith("de") ? LANGUAGE_MODES.DE : LANGUAGE_MODES.EN;
+  return configured === LANGUAGE_MODES.DE || configured === LANGUAGE_MODES.EN ? configured : null;
 }
 
 function selectedLanguageMode() {

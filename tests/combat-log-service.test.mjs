@@ -173,3 +173,20 @@ test("ready resumes stored active logs only on GM clients", async () => {
   await createService(gmSaves).ready();
   assert.deepEqual(gmSaves, ["orphaned"]);
 });
+test("chat events record the message author without the deprecated user field", async () => {
+  const service = new CombatLogService();
+  service.saveAndCompute = async (log) => log;
+  service.recordRolls = () => {};
+  service.recordChatApplications = () => {};
+  const log = { id: "log-chat", combatId: "combat-chat", participants: [], sessionSegments: [], events: [] };
+  service.findLogForMessage = () => log;
+  service.findCombatForLog = () => ({ id: "combat-chat", round: 1, turn: 0 });
+  const deprecatedUser = () => {
+    throw new Error("the deprecated user field should not be read");
+  };
+
+  await service.chatMessageCreated({ id: "m1", speaker: {}, author: { id: "player1" }, get user() { return deprecatedUser(); } });
+  await service.chatMessageCreated({ id: "m2", speaker: {}, _source: { author: "player2", get user() { return deprecatedUser(); } } });
+
+  assert.deepEqual(log.events.map((event) => event.userId), ["player1", "player2"]);
+});

@@ -56,6 +56,16 @@ The world setting `sephrals-combat-log-stats.combatLogIndex` is kept as a compac
 
 On Foundry VTT v13, where client-side world file uploads can be unavailable or unreliable, SCLS uses the same world setting as an inline fallback for the stored combat logs. Foundry VTT v14 uses the world-data JSON file when the client upload API is available.
 
+### The Forge
+
+On The Forge the world folder is not writable, so on Foundry VTT v14 SCLS stores the JSON file in the Assets Library of the Forge account instead:
+
+```text
+sephrals-combat-log-stats/<world-id>/combat-logs.json
+```
+
+The index in `sephrals-combat-log-stats.combatLogIndex` keeps the absolute Assets Library URL that The Forge returns for the upload, and SCLS reads the file back from that URL. Combat logs saved by earlier versions under `worlds/<world-id>/data/sephrals-combat-log-stats/combat-logs.json` stay readable and are copied to the new location on the next save. The old file is not deleted. On Foundry VTT v13, and whenever an upload fails, SCLS keeps the combat logs in the world setting as described above.
+
 ## Impact Meter
 
 The default DPR view is Applied Net DPR:
