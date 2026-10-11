@@ -2,7 +2,7 @@ import { getSystemAdapter } from "../adapters/adapter-registry.js";
 import { CONFIDENCE, EVENT_TYPES, HOOKS, LOG_STATUS, RESOURCE_INTERPRETATIONS, SEGMENT_REASONS, SETTINGS, SHARE_MODES, SOURCE_KINDS } from "../constants.js";
 import { closeCurrentSegment, createCombatLog, createSessionSegment, snapshotParticipant } from "../models/combat-log.js";
 import { getSetting } from "../settings.js";
-import { cloneData, debugLog, getProperty, isoNow } from "../utils.js";
+import { cloneData, debugLog, getProperty, isGM, isoNow } from "../utils.js";
 import { CombatEventLedger } from "./event-ledger.js";
 import { CombatLogPersistenceService } from "./persistence-service.js";
 import { CombatStatsService } from "./stats-service.js?v=20260519i";
@@ -23,6 +23,8 @@ export class CombatLogService {
   }
 
   async ready() {
+    // Resuming saves the logs (world setting + world-data file), which only GMs may write.
+    if (!isGM()) return;
     if (!getSetting(SETTINGS.AUTO_RESUME_ACTIVE_COMBATS, true)) return;
     const logs = await this.persistence.loadActiveLogs();
     for (const log of logs) await this.resumeLog(log);

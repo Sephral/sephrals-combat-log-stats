@@ -146,3 +146,30 @@ test("deleting an active Foundry combat ends the log and runs auto reports", asy
   assert.deepEqual(savedStatuses, ["ended", "ended"]);
   settings.delete(`sephrals-combat-log-stats.${SETTINGS.AUTO_POST_PLAYER_SUMMARY_ON_END}`);
 });
+
+test("ready resumes stored active logs only on GM clients", async () => {
+  const orphan = { id: "log1", combatId: "gone", combatUuid: "Combat.gone", status: "active", participants: [], sessionSegments: [], events: [] };
+  const createService = (saved) => {
+    const service = new CombatLogService();
+    service.persistence.loadActiveLogs = async () => [structuredClone(orphan)];
+    service.persistence.saveLog = async (log) => {
+      saved.push(log.status);
+      return log;
+    };
+    return service;
+  };
+  game.combats.contents = [];
+
+  const playerSaves = [];
+  game.user.isGM = false;
+  try {
+    await createService(playerSaves).ready();
+  } finally {
+    game.user.isGM = true;
+  }
+  assert.deepEqual(playerSaves, []);
+
+  const gmSaves = [];
+  await createService(gmSaves).ready();
+  assert.deepEqual(gmSaves, ["orphaned"]);
+});
