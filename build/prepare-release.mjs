@@ -13,6 +13,7 @@ const packageDir = path.join(releaseRoot, "package");
 
 const filesToCopy = [
   "LICENSE.md",
+  "MANUAL.md",
   "README.md",
   "lang",
   "scripts",
