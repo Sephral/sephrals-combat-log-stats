@@ -1,6 +1,22 @@
-import { CONFIDENCE, EVENT_TYPES, SETTINGS, SHARE_MODES, SIDES, SOURCE_KINDS, VISIBILITY } from "../constants.js";
+import { CONFIDENCE, EVENT_TYPES, RESOURCE_INTERPRETATIONS, SETTINGS, SHARE_MODES, SIDES, SOURCE_KINDS, VISIBILITY } from "../constants.js";
 import { getSetting } from "../settings.js";
-import { escapeHtml, isoNow } from "../utils.js";
+import { activeLocale, escapeHtml, format, isoNow, localize } from "../utils.js";
+import {
+  actionName,
+  eventAmount,
+  isControl,
+  isCritical,
+  isDamageApplied,
+  isDamageDealt,
+  isDowned,
+  isHealingApplied,
+  isMagic,
+  isMartial,
+  isRanged,
+  isResourceDelta,
+  sourceCombatantId,
+  targetCombatantId
+} from "./event-insights.js";
 
 const PLAYER_VISIBLE_MODES = new Set([
   SHARE_MODES.SUMMARY_ONLY,
@@ -9,6 +25,11 @@ const PLAYER_VISIBLE_MODES = new Set([
   SHARE_MODES.FULL_VISIBLE_RECAP,
   SHARE_MODES.PUBLIC_REPORT
 ]);
+
+// Modes that may show numbers about the enemy side, and only when the GM includes enemy stats.
+const ENEMY_STAT_MODES = new Set([SHARE_MODES.FULL_VISIBLE_DPR, SHARE_MODES.FULL_VISIBLE_RECAP, SHARE_MODES.PUBLIC_REPORT]);
+// Modes that may describe single actions. The other modes share totals only.
+const ACTION_DETAIL_MODES = new Set([SHARE_MODES.FULL_VISIBLE_RECAP, SHARE_MODES.PUBLIC_REPORT]);
 
 export const REPORT_SECTIONS = Object.freeze([
   { key: "combatRecap", labelKey: "SCLS.ReportSection.CombatRecap" },
@@ -28,6 +49,35 @@ export const REPORT_SECTIONS = Object.freeze([
 
 const DEFAULT_REPORT_SECTIONS = Object.freeze(Object.fromEntries(REPORT_SECTIONS.map((section) => [section.key, section.defaultSelected !== false])));
 
+// Sections that describe single actions and therefore need an action detail mode.
+const ACTION_SECTIONS = new Set(["martialHighlights", "spellwork", "healingSupport", "controlPlays", "closeCalls", "heroMoments", "tacticalTurningPoints", "supportSaves"]);
+
+// Bookkeeping events that never belong in a player report.
+const NON_REPORT_TYPES = new Set([
+  EVENT_TYPES.GM_NOTE,
+  EVENT_TYPES.GM_MARKER,
+  EVENT_TYPES.SHARE_CREATED,
+  EVENT_TYPES.SHARE_UPDATED,
+  EVENT_TYPES.SHARE_REVOKED,
+  EVENT_TYPES.EXPORT_CREATED,
+  EVENT_TYPES.SYSTEM_WARNING,
+  EVENT_TYPES.CHAT_MESSAGE_CREATED
+]);
+
+// Events read from the game state (hit point changes, effects, combat updates) are stored with GM visibility,
+// although every player sees the change on the token. Only chat messages and rolls carry a real whisper decision.
+const OBSERVED_SOURCE_KINDS = new Set([
+  SOURCE_KINDS.ACTOR_UPDATE,
+  SOURCE_KINDS.ACTIVE_EFFECT_UPDATE,
+  SOURCE_KINDS.TOKEN_UPDATE,
+  SOURCE_KINDS.COMBAT_UPDATE,
+  SOURCE_KINDS.HOOK,
+  SOURCE_KINDS.RESUME
+]);
+
+const TARGET_FALLBACK = "SCLS.Report.Fallback.Target";
+const SOMEONE_FALLBACK = "SCLS.Report.Fallback.Someone";
+
 export class PlayerReportService {
   canShare(log) {
     if (!getSetting(SETTINGS.ENABLE_PLAYER_SHARING, true)) return false;
@@ -38,124 +88,34 @@ export class PlayerReportService {
 
   buildReport(log, options = {}) {
     const share = { ...(log?.shareSettings ?? {}), ...(options.shareSettings ?? {}) };
-    const mode = share.shareMode ?? SHARE_MODES.GM_ONLY;
     const sections = normalizeReportSections(share.reportSections);
-    const stats = log?.computed ?? {};
-    const participants = visibleParticipants(log, share);
-    const includeDPR = sections.damageSpotlight && mode !== SHARE_MODES.SUMMARY_ONLY;
-    const includeEnemyStats = share.includeEnemyStats && [SHARE_MODES.FULL_VISIBLE_DPR, SHARE_MODES.FULL_VISIBLE_RECAP, SHARE_MODES.PUBLIC_REPORT].includes(mode);
-    const includeTimeline = hasAnyHighlightSection(sections) && [SHARE_MODES.FULL_VISIBLE_RECAP, SHARE_MODES.PUBLIC_REPORT].includes(mode);
-    const includeCorrections = false;
-
-    const summary = reportSummary(log, includeEnemyStats, share);
-
+    const ctx = reportContext(log, share);
+    const lines = {};
+    for (const section of REPORT_SECTIONS) {
+      lines[section.key] = sections[section.key] && sectionAllowed(section.key, ctx) ? SECTION_BUILDERS[section.key](ctx) : [];
+    }
     return {
-      title: log?.title ?? "Combat Report",
-      status: log?.status ?? "unknown",
-      generatedAt: isoNow(),
-      startedAt: log?.startedAt ?? null,
-      endedAt: log?.endedAt ?? null,
-      rounds: stats?.summary?.rounds ?? 0,
-      participants,
-      summary,
-      dpr: includeDPR ? visibleDprRows(log, share, includeEnemyStats) : [],
-      timeline: includeTimeline ? visibleTimeline(log, share, includeCorrections) : [],
-      highlights: includeTimeline ? buildHighlights(log, share, includeEnemyStats, includeCorrections) : [],
-      martialHighlights: includeTimeline ? martialHighlights(log, share, includeEnemyStats, includeCorrections) : [],
-      magicHighlights: includeTimeline ? magicHighlights(log, share, includeEnemyStats, includeCorrections) : [],
-      healingHighlights: includeTimeline ? healingHighlightsForReport(log, share, includeEnemyStats, includeCorrections) : [],
-      controlHighlights: includeTimeline ? controlHighlights(log, share, includeEnemyStats, includeCorrections) : [],
-      downedHighlights: includeTimeline ? downedHighlights(log, share, includeEnemyStats, includeCorrections) : [],
-      heroMoments: sections.heroMoments ? heroMoments(log, share, includeEnemyStats, includeCorrections) : [],
-      enemyPressure: sections.enemyPressure ? enemyPressure(log, share, includeCorrections) : [],
-      tacticalTurningPoints: sections.tacticalTurningPoints ? tacticalTurningPoints(log, share, includeEnemyStats, includeCorrections) : [],
-      supportSaves: sections.supportSaves ? supportSaves(log, share, includeEnemyStats, includeCorrections) : [],
-      aftermath: sections.aftermath ? aftermath(log, share, includeEnemyStats) : [],
-      contributions: buildContributions(log, share),
-      spotlight: includeDPR ? buildSpotlight(log, share, includeEnemyStats) : [],
-      warnings: share.includeUnclearEvents ? (stats?.warnings ?? []) : (stats?.warnings ?? []).filter((warning) => !String(warning).toLowerCase().includes("unclear")),
-      shareMode: mode,
-      sections
+      title: log?.title || localize("SCLS.Report.DefaultTitle"),
+      shareMode: ctx.mode,
+      sections,
+      summary: ctx.summary,
+      lines
     };
   }
 
   renderMarkdown(report) {
-    const lines = [
-      `# ${report.title}`
-    ];
-
-    if (sectionEnabled(report, "combatRecap")) {
-      lines.push("", "## Combat Recap", "", `- The party dealt ${report.summary.netDamageApplied} total damage over ${report.rounds} rounds.`, `- The party recovered ${report.summary.netHealingApplied} hit points during the fight.`, `- Party pace: ${report.summary.partyDPR} damage per round.`);
-      if (report.summary.enemyDPR !== null) lines.push(`- Enemy pressure: ${report.summary.enemyDPR} damage per round.`);
-      if (report.summary.unclassifiedDeltas !== null && report.summary.unclassifiedDeltas > 0) lines.push(`- ${report.summary.unclassifiedDeltas} unclear events were included for GM transparency.`);
+    const lines = [`# ${report.title}`];
+    for (const section of REPORT_SECTIONS) {
+      const entries = sectionEnabled(report, section.key) ? (report.lines?.[section.key] ?? []) : [];
+      if (!entries.length) continue;
+      lines.push("", `## ${localize(section.labelKey)}`, "", ...entries.map((entry) => `- ${entry}`));
     }
-
-    if (sectionEnabled(report, "partyContributions") && report.contributions.length) {
-      lines.push("", "## Party Contributions", "");
-      for (const contribution of report.contributions) lines.push(`- ${contribution}`);
-    }
-
-    if (sectionEnabled(report, "martialHighlights") && report.martialHighlights.length) {
-      lines.push("", "## Blades, Bows, and Close Calls", "");
-      for (const highlight of report.martialHighlights) lines.push(`- ${highlight}`);
-    }
-
-    if (sectionEnabled(report, "spellwork") && report.magicHighlights.length) {
-      lines.push("", "## Spellwork", "");
-      for (const highlight of report.magicHighlights) lines.push(`- ${highlight}`);
-    }
-
-    if (sectionEnabled(report, "healingSupport") && report.healingHighlights.length) {
-      lines.push("", "## Healing and Support", "");
-      for (const highlight of report.healingHighlights) lines.push(`- ${highlight}`);
-    }
-
-    if (sectionEnabled(report, "controlPlays") && report.controlHighlights.length) {
-      lines.push("", "## Control Plays", "");
-      for (const highlight of report.controlHighlights) lines.push(`- ${highlight}`);
-    }
-
-    if (sectionEnabled(report, "closeCalls") && report.downedHighlights.length) {
-      lines.push("", "## Close Calls", "");
-      for (const highlight of report.downedHighlights) lines.push(`- ${highlight}`);
-    }
-
-    if (sectionEnabled(report, "damageSpotlight") && report.spotlight.length) {
-      lines.push("", "## Damage Spotlight", "");
-      for (const row of report.spotlight) lines.push(`- ${row}`);
-    }
-
-    if (sectionEnabled(report, "heroMoments") && report.heroMoments.length) {
-      lines.push("", "## Hero Moments", "");
-      for (const highlight of report.heroMoments) lines.push(`- ${highlight}`);
-    }
-
-    if (sectionEnabled(report, "enemyPressure") && report.enemyPressure.length) {
-      lines.push("", "## Enemy Pressure", "");
-      for (const highlight of report.enemyPressure) lines.push(`- ${highlight}`);
-    }
-
-    if (sectionEnabled(report, "tacticalTurningPoints") && report.tacticalTurningPoints.length) {
-      lines.push("", "## Tactical Turning Points", "");
-      for (const highlight of report.tacticalTurningPoints) lines.push(`- ${highlight}`);
-    }
-
-    if (sectionEnabled(report, "supportSaves") && report.supportSaves.length) {
-      lines.push("", "## Support and Saves", "");
-      for (const highlight of report.supportSaves) lines.push(`- ${highlight}`);
-    }
-
-    if (sectionEnabled(report, "aftermath") && report.aftermath.length) {
-      lines.push("", "## Aftermath", "");
-      for (const highlight of report.aftermath) lines.push(`- ${highlight}`);
-    }
-
+    if (lines.length === 1) lines.push("", localize("SCLS.Report.Empty"));
     return `${lines.join("\n")}\n`;
   }
 
   renderHtml(report) {
-    const markdown = this.renderMarkdown(report);
-    return markdownToHtml(markdown);
+    return markdownToHtml(this.renderMarkdown(report));
   }
 
   appendShareEvent(log, action, data = {}) {
@@ -170,7 +130,7 @@ export class PlayerReportService {
       actorUuid: "",
       tokenUuid: "",
       sceneUuid: log.sceneUuid,
-      userId: game?.user?.id ?? "",
+      userId: globalThis.game?.user?.id ?? "",
       visibility: VISIBILITY.GM,
       source: { kind: SOURCE_KINDS.MANUAL, id: action },
       confidence: CONFIDENCE.MANUAL,
@@ -200,399 +160,573 @@ export class PlayerReportService {
       text: { content, format: globalThis.CONST?.JOURNAL_ENTRY_PAGE_FORMATS?.HTML ?? 1 }
     };
     this.appendShareEvent(log, "updated", { target: "journal", shareMode: report.shareMode });
-    return JournalEntryClass.create({ name: report.title, pages: [page] });
+    const entry = await JournalEntryClass.create({ name: report.title, pages: [page], ownership: journalOwnership() });
+    if (entry?.uuid) log.shareSettings.journalUuids = [...new Set([...(log.shareSettings.journalUuids ?? []), entry.uuid])];
+    return entry;
+  }
+
+  // Stopping the share hides the journal reports of this combat from players again. The GM keeps them.
+  async revokeJournalReports(log) {
+    const none = globalThis.CONST?.DOCUMENT_OWNERSHIP_LEVELS?.NONE ?? 0;
+    let revoked = 0;
+    for (const uuid of log?.shareSettings?.journalUuids ?? []) {
+      const entry = await globalThis.fromUuid?.(uuid);
+      if (!entry) continue;
+      await entry.update({ "ownership.default": none });
+      revoked += 1;
+    }
+    return revoked;
   }
 }
 
-function visibleParticipants(log, share) {
-  let enemyIndex = 0;
-  return (log?.participants ?? [])
-    .filter((participant) => share.includeHiddenCombatants || !participant.hidden)
-    .filter((participant) => participant.side !== SIDES.HOSTILE || share.includeEnemyStats || share.includeNpcNames)
-    .map((participant) => ({
-      id: participant.combatantId,
-      name: publicParticipantName(participant, share, () => ++enemyIndex),
-      side: participant.side ?? SIDES.UNKNOWN,
-      isPlayerOwned: Boolean(participant.isPlayerOwned)
-    }));
-}
-
-function visibleDprRows(log, share, includeEnemyStats) {
-  let enemyIndex = 0;
-  return (log?.computed?.dpr?.byCombatant ?? [])
-    .filter((row) => row.side !== SIDES.HOSTILE || includeEnemyStats)
-    .map((row) => ({
-      name: row.side === SIDES.HOSTILE ? publicEnemyName(row, share, () => ++enemyIndex) : row.name,
-      side: row.side,
-      damageAppliedNet: row.damageAppliedNet,
-      netDPR: row.netDPR,
-      unclearEvents: share.includeUnclearEvents ? row.unclearEvents : null
-    }));
-}
-
-function reportSummary(log, includeEnemyStats, share) {
-  const stats = log?.computed ?? {};
-  const friendlySide = (stats?.dpr?.bySide ?? []).find((row) => row.id === SIDES.FRIENDLY || row.side === SIDES.FRIENDLY);
-  return {
-    netDamageApplied: friendlySide?.damageAppliedNet ?? stats?.summary?.netDamageApplied ?? 0,
-    grossDamageApplied: friendlySide?.damageAppliedGross ?? stats?.summary?.grossDamageApplied ?? 0,
-    netHealingApplied: friendlySide?.healingNet ?? stats?.summary?.netHealingApplied ?? 0,
-    partyDPR: stats?.dpr?.partyDPR ?? 0,
-    enemyDPR: includeEnemyStats ? (stats?.dpr?.enemyDPR ?? 0) : null,
-    unclassifiedDeltas: share.includeUnclearEvents ? (stats?.summary?.unclassifiedDeltas ?? 0) : null
-  };
-}
-
-function visibleTimeline(log, share, includeCorrections) {
-  return (log?.events ?? [])
-    .filter((event) => !event.ignored)
-    .filter((event) => event.visibility !== VISIBILITY.GM || canExposeGmOnlyEvent(event, share, includeCorrections))
-    .filter((event) => ![EVENT_TYPES.GM_NOTE, EVENT_TYPES.GM_MARKER].includes(event.type))
-    .filter((event) => share.includeUnclearEvents || event.confidence !== CONFIDENCE.UNCLEAR)
-    .filter((event) => includeCorrections || !isCorrectionEvent(event))
-    .map((event) => ({ id: event.id, label: `${event.round ? `Round ${event.round}: ` : ""}${event.type} (${event.confidence})` }));
-}
-
-function buildSpotlight(log, share, includeEnemyStats) {
-  const rows = visibleDprRows(log, share, includeEnemyStats)
-    .filter((row) => Number(row.damageAppliedNet) > 0)
-    .sort((left, right) => Number(right.damageAppliedNet) - Number(left.damageAppliedNet))
-    .slice(0, 5);
-  return rows.map((row, index) => `${index + 1}. ${row.name}: ${row.damageAppliedNet} damage (${row.netDPR} DPR)`);
-}
-
-function buildHighlights(log, share, includeEnemyStats, includeCorrections) {
-  const participants = participantNameMaps(log, share);
-  const visibleEvents = visibleReportEvents(log, share, includeEnemyStats, includeCorrections, participants);
-
-  const highlights = [];
-  highlights.push(...aoeHighlights(visibleEvents, participants));
-  highlights.push(...singleHitHighlights(visibleEvents, participants));
-  highlights.push(...healingHighlights(visibleEvents, participants));
-  highlights.push(...effectHighlights(visibleEvents, participants));
-  return uniqueLines(highlights).slice(0, 8);
-}
-
-function buildContributions(log, share) {
-  const participants = participantNameMaps(log, share);
-  const dprRows = new Map((log?.computed?.dpr?.byCombatant ?? []).map((row) => [row.id, row]));
-  return (log?.participants ?? [])
-    .filter((participant) => participant.side === SIDES.FRIENDLY || participant.isPlayerOwned)
-    .map((participant) => contributionLine(participant, participants, dprRows, log?.events ?? []));
-}
-
-function contributionLine(participant, participants, dprRows, events) {
-  const row = dprRows.get(participant.combatantId) ?? {};
-  const ownEvents = events.filter((event) => !event.ignored && event.combatantId === participant.combatantId);
-  const damage = Number(row.damageAppliedNet ?? 0) || ownEvents.filter(isDamageEvent).reduce((total, event) => total + eventAmount(event), 0);
-  const healing = Number(row.healingNet ?? row.healingAppliedNet ?? 0) || ownEvents.filter(isHealingEvent).reduce((total, event) => total + eventAmount(event), 0);
-  const martial = ownEvents.filter((event) => isDamageEvent(event) && isMartialAction(event)).length;
-  const magic = ownEvents.filter((event) => isDamageEvent(event) && isMagicAction(event)).length;
-  const control = ownEvents.filter(isControlEvent).length;
-  const details = [];
-  if (damage > 0) details.push(`${damage} damage`);
-  if (healing > 0) details.push(`${healing} healing`);
-  if (martial > 0) details.push(`${martial} martial moments`);
-  if (magic > 0) details.push(`${magic} spell moments`);
-  if (control > 0) details.push(`${control} control plays`);
-  const publicName = participants.byCombatantId.get(participant.combatantId)?.publicName ?? participant.name;
-  if (!details.length) return `${publicName} stayed in the fight and helped hold the line.`;
-  return `${publicName}: ${details.join(", ")}.`;
-}
-
-function martialHighlights(log, share, includeEnemyStats, includeCorrections) {
-  const participants = participantNameMaps(log, share);
-  return visibleReportEvents(log, share, includeEnemyStats, includeCorrections, participants)
-    .filter((event) => isDamageEvent(event) && isMartialAction(event))
-    .map((event) => ({ event, amount: eventAmount(event), source: participantForEvent(event, participants), target: targetForEvent(event, participants) }))
-    .filter((entry) => entry.amount > 0)
-    .sort((left, right) => right.amount - left.amount)
-    .slice(0, 3)
-    .map((entry) => `Round ${entry.event.round}: ${entry.source?.publicName ?? "Someone"} pressured ${entry.target?.publicName ?? entry.event.data?.targetName ?? "a target"} with ${eventActionName(entry.event) || "a weapon attack"} for ${entry.amount} damage.`);
-}
-
-function magicHighlights(log, share, includeEnemyStats, includeCorrections) {
-  const participants = participantNameMaps(log, share);
-  const visibleEvents = visibleReportEvents(log, share, includeEnemyStats, includeCorrections, participants).filter((event) => isDamageEvent(event) && isMagicAction(event));
-  return uniqueLines([...aoeHighlights(visibleEvents, participants), ...singleHitHighlights(visibleEvents, participants)]).slice(0, 5);
-}
-
-function healingHighlightsForReport(log, share, includeEnemyStats, includeCorrections) {
-  const participants = participantNameMaps(log, share);
-  return healingHighlights(visibleReportEvents(log, share, includeEnemyStats, includeCorrections, participants), participants).slice(0, 4);
-}
-
-function controlHighlights(log, share, includeEnemyStats, includeCorrections) {
-  const participants = participantNameMaps(log, share);
-  return visibleReportEvents(log, share, includeEnemyStats, includeCorrections, participants)
-    .filter(isControlEvent)
-    .slice(0, 5)
-    .map((event) => `Round ${event.round}: ${participantForEvent(event, participants)?.publicName ?? "Someone"} shaped the battlefield with ${event.data?.name || eventActionName(event) || "control"}.`);
-}
-
-function downedHighlights(log, share, includeEnemyStats, includeCorrections) {
-  const participants = participantNameMaps(log, share);
-  return visibleReportEvents(log, share, includeEnemyStats, includeCorrections, participants)
-    .filter(targetFellToZero)
-    .map((event) => ({ event, target: targetForEvent(event, participants), source: participantForEvent(event, participants) }))
-    .filter((entry) => entry.target?.side === SIDES.FRIENDLY || entry.target?.isPlayerOwned)
-    .slice(0, 5)
-    .map((entry) => `Round ${entry.event.round}: ${entry.target?.publicName ?? entry.event.data?.targetName ?? "A hero"} dropped to 0 HP after ${entry.source?.publicName ?? "the enemy"}'s ${eventActionName(entry.event) || "attack"}.`);
-}
-
-function heroMoments(log, share, includeEnemyStats, includeCorrections) {
-  const participants = participantNameMaps(log, share);
-  return visibleReportEvents(log, share, includeEnemyStats, includeCorrections, participants)
-    .filter((event) => participantForEvent(event, participants)?.side === SIDES.FRIENDLY)
-    .filter((event) => isDamageEvent(event) || isHealingEvent(event) || isControlEvent(event))
-    .map((event) => heroMomentLine(event, participants))
-    .filter(Boolean)
-    .slice(0, 6);
-}
-
-function heroMomentLine(event, participants) {
-  const source = participantForEvent(event, participants)?.publicName ?? "A hero";
-  const target = targetForEvent(event, participants)?.publicName ?? event.data?.targetName ?? "the fight";
-  const action = eventActionName(event) || event.data?.name || "a decisive action";
-  const amount = eventAmount(event);
-  if (isHealingEvent(event)) return `Round ${event.round}: ${source} kept ${target} standing with ${action}${amount ? ` for ${amount} HP` : ""}.`;
-  if (isControlEvent(event)) return `Round ${event.round}: ${source} changed the board with ${action}.`;
-  return `Round ${event.round}: ${source} landed ${action} against ${target}${amount ? ` for ${amount} damage` : ""}.`;
-}
-
-function enemyPressure(log, share, includeCorrections) {
-  const enemyShare = { ...share, includeEnemyStats: true, includeNpcNames: true, anonymizeEnemies: false };
-  const participants = participantNameMaps(log, enemyShare);
-  return visibleReportEvents(log, enemyShare, true, includeCorrections, participants)
-    .filter((event) => participantForEvent(event, participants)?.side === SIDES.HOSTILE)
-    .filter((event) => isDamageEvent(event) || isControlEvent(event) || targetFellToZero(event))
-    .map((event) => enemyPressureLine(event, participants))
-    .filter(Boolean)
-    .slice(0, 6);
-}
-
-function enemyPressureLine(event, participants) {
-  const source = participantForEvent(event, participants)?.publicName ?? "The opposition";
-  const target = targetForEvent(event, participants)?.publicName ?? event.data?.targetName ?? "the party";
-  const action = eventActionName(event) || event.data?.name || "pressure";
-  const amount = eventAmount(event);
-  if (targetFellToZero(event)) return `Round ${event.round}: ${source} nearly swung the fight by dropping ${target} with ${action}.`;
-  if (isControlEvent(event)) return `Round ${event.round}: ${source} disrupted the party with ${action}.`;
-  return `Round ${event.round}: ${source} pressured ${target}${amount ? ` for ${amount} damage` : ""}.`;
-}
-
-function tacticalTurningPoints(log, share, includeEnemyStats, includeCorrections) {
-  const participants = participantNameMaps(log, share);
-  const events = visibleReportEvents(log, share, includeEnemyStats, includeCorrections, participants);
-  const turns = [];
-  turns.push(...events.filter(targetFellToZero).map((event) => ({ weight: 5, line: turningPointLine(event, participants, "downed") })));
-  turns.push(...events.filter(isControlEvent).map((event) => ({ weight: 4, line: turningPointLine(event, participants, "control") })));
-  turns.push(...events.filter(isHealingEvent).map((event) => ({ weight: 3, line: turningPointLine(event, participants, "healing") })));
-  turns.push(...events.filter(isDamageEvent).filter((event) => eventAmount(event) > 0).map((event) => ({ weight: eventAmount(event), line: turningPointLine(event, participants, "damage") })));
-  return uniqueLines(turns.sort((left, right) => right.weight - left.weight).map((entry) => entry.line)).slice(0, 6);
-}
-
-function turningPointLine(event, participants, kind) {
-  const source = participantForEvent(event, participants)?.publicName ?? "Someone";
-  const target = targetForEvent(event, participants)?.publicName ?? event.data?.targetName ?? "a target";
-  const action = eventActionName(event) || event.data?.name || event.type;
-  const amount = eventAmount(event);
-  if (kind === "downed") return `Round ${event.round}: ${target} hit 0 HP after ${source}'s ${action}.`;
-  if (kind === "control") return `Round ${event.round}: ${source}'s ${action} changed the tactical shape of the fight.`;
-  if (kind === "healing") return `Round ${event.round}: ${source} restored momentum with ${amount} healing from ${action}.`;
-  return `Round ${event.round}: ${source}'s ${action} created a ${amount}-damage swing against ${target}.`;
-}
-
-function supportSaves(log, share, includeEnemyStats, includeCorrections) {
-  const participants = participantNameMaps(log, share);
-  return visibleReportEvents(log, share, includeEnemyStats, includeCorrections, participants)
-    .filter((event) => isHealingEvent(event) || isControlEvent(event))
-    .map((event) => supportSaveLine(event, participants))
-    .filter(Boolean)
-    .slice(0, 6);
-}
-
-function supportSaveLine(event, participants) {
-  const source = participantForEvent(event, participants)?.publicName ?? "Someone";
-  const target = targetForEvent(event, participants)?.publicName ?? event.data?.targetName ?? "the party";
-  const action = eventActionName(event) || event.data?.name || "support";
-  const amount = eventAmount(event);
-  if (isHealingEvent(event)) return `Round ${event.round}: ${source} supported ${target} with ${action}${amount ? ` for ${amount} HP` : ""}.`;
-  return `Round ${event.round}: ${source} protected the party's tempo with ${action}.`;
-}
-
-function aftermath(log, share, includeEnemyStats) {
-  const stats = log?.computed ?? {};
-  const participants = visibleParticipants(log, { ...share, includeEnemyStats, includeNpcNames: includeEnemyStats });
-  const lines = [];
-  lines.push(`${participants.filter((participant) => participant.side === SIDES.FRIENDLY || participant.isPlayerOwned).length} player-side combatants were tracked in the report.`);
-  lines.push(`The fight closed after ${stats?.summary?.rounds ?? 0} rounds with ${stats?.summary?.netDamageApplied ?? 0} net damage and ${stats?.summary?.netHealingApplied ?? 0} healing recorded.`);
-  if (includeEnemyStats) lines.push(`${participants.filter((participant) => participant.side === SIDES.HOSTILE).length} hostile combatants are visible in this report.`);
-  return lines;
-}
-
-function visibleReportEvents(log, share, includeEnemyStats, includeCorrections, participants = participantNameMaps(log, share)) {
-  return (log?.events ?? [])
-    .filter((event) => !event.ignored)
-    .filter((event) => event.visibility !== VISIBILITY.GM || canExposeGmOnlyEvent(event, share, includeCorrections))
-    .filter((event) => ![EVENT_TYPES.GM_NOTE, EVENT_TYPES.GM_MARKER].includes(event.type))
-    .filter((event) => share.includeUnclearEvents || event.confidence !== CONFIDENCE.UNCLEAR)
-    .filter((event) => includeCorrections || !isCorrectionEvent(event))
-    .filter((event) => includeEnemyStats || eventSide(event, participants) !== SIDES.HOSTILE);
-}
-
-function participantNameMaps(log, share) {
-  const byCombatantId = new Map();
-  const byActorUuid = new Map();
-  const byTokenUuid = new Map();
-  let enemyIndex = 0;
-  for (const participant of log?.participants ?? []) {
-    const publicName = publicParticipantName(participant, share, () => ++enemyIndex);
-    const row = { ...participant, publicName };
-    if (participant.combatantId) byCombatantId.set(participant.combatantId, row);
-    if (participant.actorUuid) byActorUuid.set(participant.actorUuid, row);
-    if (participant.tokenUuid) byTokenUuid.set(participant.tokenUuid, row);
-  }
-  return { byCombatantId, byActorUuid, byTokenUuid };
-}
-
-function participantForEvent(event, participants) {
-  return participants.byCombatantId.get(event.combatantId) ?? participants.byActorUuid.get(event.actorUuid) ?? participants.byTokenUuid.get(event.tokenUuid) ?? null;
-}
-
-function targetForEvent(event, participants) {
-  return participants.byCombatantId.get(event.data?.targetCombatantId) ?? participants.byActorUuid.get(event.data?.targetActorUuid) ?? participants.byTokenUuid.get(event.data?.targetTokenUuid) ?? null;
-}
-
-function eventSide(event, participants) {
-  return participantForEvent(event, participants)?.side ?? SIDES.UNKNOWN;
-}
-
-function aoeHighlights(events, participants) {
-  const grouped = new Map();
-  for (const event of events.filter((entry) => isDamageEvent(entry))) {
-    const actionName = eventActionName(event);
-    const key = `${event.round ?? ""}|${event.combatantId ?? ""}|${actionName}`;
-    const group = grouped.get(key) ?? { round: event.round, source: participantForEvent(event, participants), actionName, total: 0, targets: new Set() };
-    group.total += eventAmount(event);
-    group.targets.add(targetForEvent(event, participants)?.publicName ?? event.data?.targetName ?? "a target");
-    grouped.set(key, group);
-  }
-  return Array.from(grouped.values())
-    .filter((group) => group.total > 0)
-    .filter((group) => group.targets.size > 1 || /aoe|burst|wave|cone|ball|storm|cloud|guardians|sphere|blast|pulse/i.test(group.actionName))
-    .sort((left, right) => right.total - left.total)
-    .slice(0, 3)
-    .map((group) => `Round ${group.round}: ${group.source?.publicName ?? "Someone"} hit ${group.targets.size} targets with ${group.actionName || "an area attack"} for ${group.total} total damage.`);
-}
-
-function singleHitHighlights(events, participants) {
-  return events
-    .filter((event) => isDamageEvent(event))
-    .map((event) => ({ event, amount: eventAmount(event), source: participantForEvent(event, participants), target: targetForEvent(event, participants) }))
-    .filter((entry) => entry.amount > 0)
-    .sort((left, right) => right.amount - left.amount)
-    .slice(0, 3)
-    .map((entry) => `Round ${entry.event.round}: ${entry.source?.publicName ?? "Someone"} struck ${entry.target?.publicName ?? entry.event.data?.targetName ?? "a target"} with ${eventActionName(entry.event) || "an attack"} for ${entry.amount} damage.`);
-}
-
-function healingHighlights(events, participants) {
-  return events
-    .filter((event) => isHealingEvent(event))
-    .map((event) => ({ event, amount: eventAmount(event), source: participantForEvent(event, participants), target: targetForEvent(event, participants) }))
-    .filter((entry) => entry.amount > 0)
-    .sort((left, right) => right.amount - left.amount)
-    .slice(0, 2)
-    .map((entry) => `Round ${entry.event.round}: ${entry.source?.publicName ?? "Someone"} restored ${entry.amount} HP to ${entry.target?.publicName ?? entry.event.data?.targetName ?? "an ally"} with ${eventActionName(entry.event) || "healing"}.`);
-}
-
-function effectHighlights(events, participants) {
-  return events
-    .filter((event) => [EVENT_TYPES.ACTIVE_EFFECT_CREATED, EVENT_TYPES.ACTIVE_EFFECT_DELETED].includes(event.type))
-    .slice(0, 3)
-    .map((event) => `Round ${event.round}: ${participantForEvent(event, participants)?.publicName ?? "Someone"} changed ${targetForEvent(event, participants)?.publicName ?? event.data?.targetName ?? "the battlefield"} with ${event.data?.name || eventActionName(event) || "an effect"}.`);
-}
-
-function uniqueLines(lines) {
-  return Array.from(new Set(lines.filter(Boolean)));
-}
-
-function isDamageEvent(event) {
-  if ([EVENT_TYPES.DAMAGE_APPLIED, EVENT_TYPES.DAMAGE_MANUAL_ADDED].includes(event.type)) return true;
-  if ([EVENT_TYPES.RESOURCE_DELTA, EVENT_TYPES.RESOURCE_DELTA_OFFLINE].includes(event.type)) return event.data?.interpretedAs === "damage" && isSourceAttributedResourceDelta(event);
-  return false;
-}
-
-function isSourceAttributedResourceDelta(event) {
-  return event.data?.attribution === "correlatedChatRoll" || Boolean(event.data?.sourceCombatantId || event.data?.sourceActorUuid || event.data?.sourceTokenUuid);
-}
-
-function isHealingEvent(event) {
-  return [EVENT_TYPES.HEALING_APPLIED, EVENT_TYPES.HEALING_MANUAL_ADDED].includes(event.type) || event.data?.interpretedAs === "healing";
-}
-
-function isControlEvent(event) {
-  if ([EVENT_TYPES.ACTIVE_EFFECT_CREATED, EVENT_TYPES.ACTIVE_EFFECT_UPDATED, EVENT_TYPES.ACTIVE_EFFECT_DELETED].includes(event.type)) return true;
-  return /control|stun|slow|prone|restrain|fear|fright|hex|pin|blind|charm|silence|web|hold|banish|bless|bane|paraly/i.test(`${eventActionName(event)} ${event?.data?.name ?? ""}`);
-}
-
-function isMagicAction(event) {
-  if (isHealingEvent(event) || isControlEvent(event)) return false;
-  return /spell|magic|fireball|bolt|shatter|cone|wave|burst|cloud|storm|spirit|sacred|radiant|necrotic|shadow|arcane|thunder|lightning|orb|missile|ray|hex|blight|guiding|burning|scorching|vitriolic|sphere|guardians/i.test(eventActionName(event));
-}
-
-function isMartialAction(event) {
-  if (isMagicAction(event)) return false;
-  return /sword|slash|strike|bow|crossbow|dagger|scimitar|bite|claw|bash|slam|charge|lunge|shot|cut|stab|rake|spear|pommel|shield|flourish|riposte|attack|weapon/i.test(eventActionName(event));
-}
-
-function eventAmount(event) {
-  return Math.abs(Number(event?.data?.amount ?? event?.data?.delta ?? event?.data?.total ?? 0)) || 0;
-}
-
-function eventActionName(event) {
-  return String(event?.data?.actionName ?? event?.data?.spellName ?? event?.data?.itemName ?? "").trim();
-}
-
-function targetFellToZero(event) {
-  const values = [event?.data?.targetHpAfter, event?.data?.targetRemainingHp, event?.data?.newValue];
-  return values.some((value) => Number(value) === 0) || Boolean(event?.data?.targetDowned);
-}
-
-function canExposeGmOnlyEvent(event, share, includeCorrections) {
-  if (isRollEvent(event)) return Boolean(share.includePrivateRolls);
-  if (isCorrectionEvent(event)) return Boolean(includeCorrections);
-  return false;
+// Players may read the report. The creating GM stays owner (GMs keep full rights in any case).
+function journalOwnership() {
+  const levels = globalThis.CONST?.DOCUMENT_OWNERSHIP_LEVELS;
+  const ownership = { default: levels?.OBSERVER ?? 2 };
+  const userId = globalThis.game?.user?.id;
+  if (userId) ownership[userId] = levels?.OWNER ?? 3;
+  return ownership;
 }
 
 export function normalizeReportSections(sections = null) {
   return { ...DEFAULT_REPORT_SECTIONS, ...(sections ?? {}) };
 }
 
-function hasAnyHighlightSection(sections) {
-  return Boolean(sections.martialHighlights || sections.spellwork || sections.healingSupport || sections.controlPlays || sections.closeCalls || sections.heroMoments || sections.enemyPressure || sections.tacticalTurningPoints || sections.supportSaves);
-}
-
 function sectionEnabled(report, key) {
   return normalizeReportSections(report.sections)[key] !== false;
 }
 
+function sectionAllowed(key, ctx) {
+  if (key === "damageSpotlight") return ctx.mode !== SHARE_MODES.SUMMARY_ONLY;
+  if (key === "enemyPressure") return ctx.includeEnemyStats;
+  if (ACTION_SECTIONS.has(key)) return ACTION_DETAIL_MODES.has(ctx.mode);
+  return true;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Report context: visible participants with public names and the events the share settings allow.
+
+function reportContext(log, share) {
+  const mode = share.shareMode ?? SHARE_MODES.GM_ONLY;
+  const { participants, hiddenIds } = participantDirectory(log, share);
+  const { events, privateRollIds } = shareableEvents(log, share, hiddenIds);
+  const ctx = {
+    share,
+    mode,
+    includeEnemyStats: Boolean(share.includeEnemyStats) && ENEMY_STAT_MODES.has(mode),
+    participants,
+    events,
+    entries: events.map((event, index) => eventEntry(event, index)),
+    downs: downIncidents(events),
+    privateRollIds,
+    stats: log?.computed ?? {}
+  };
+  // Events already told as a drop to 0 HP, so hit lists do not repeat them.
+  ctx.downEvents = new Set(ctx.downs.flatMap((down) => down.events));
+  ctx.summary = reportSummary(ctx);
+  return ctx;
+}
+
+function participantDirectory(log, share) {
+  const participants = new Map();
+  const hiddenIds = new Set();
+  let enemyIndex = 0;
+  for (const participant of log?.participants ?? []) {
+    const id = String(participant?.combatantId ?? "");
+    if (!id) continue;
+    if (participant.hidden && !share.includeHiddenCombatants) {
+      hiddenIds.add(id);
+      continue;
+    }
+    const side = participant.side ?? SIDES.UNKNOWN;
+    const name = side === SIDES.HOSTILE ? publicEnemyName(participant, share, () => ++enemyIndex) : (participant.name || localize(SOMEONE_FALLBACK));
+    participants.set(id, { id, name, side, isPlayerOwned: Boolean(participant.isPlayerOwned) });
+  }
+  return { participants, hiddenIds };
+}
+
+function publicEnemyName(participant, share, nextEnemyIndex) {
+  const anonymize = Boolean(share.anonymizeEnemies) && share.includeNpcNames !== true;
+  if (!anonymize && participant.name) return participant.name;
+  return format("SCLS.Report.EnemyName", { index: nextEnemyIndex() });
+}
+
+function shareableEvents(log, share, hiddenIds) {
+  const events = [];
+  const privateRollIds = new Set();
+  for (const event of log?.events ?? []) {
+    if (!event || event.ignored || NON_REPORT_TYPES.has(event.type) || isCorrectionEvent(event)) continue;
+    if (isPrivateEvent(event)) {
+      if (isRollEvent(event) && event.id) privateRollIds.add(event.id);
+      if (!share.includePrivateRolls) continue;
+    }
+    if (!share.includeUnclearEvents && event.confidence === CONFIDENCE.UNCLEAR) continue;
+    if (involvesHidden(event, hiddenIds)) continue;
+    events.push(event);
+  }
+  if (share.includePrivateRolls) privateRollIds.clear();
+  return { events, privateRollIds };
+}
+
+function isPrivateEvent(event) {
+  return event.visibility === VISIBILITY.GM && !OBSERVED_SOURCE_KINDS.has(event.source?.kind);
+}
+
+function involvesHidden(event, hiddenIds) {
+  if (!hiddenIds.size) return false;
+  const targets = Array.isArray(event.data?.targetCombatantIds) ? event.data.targetCombatantIds : [];
+  return [event.combatantId, event.data?.sourceCombatantId, event.data?.targetCombatantId, ...targets].some((id) => id && hiddenIds.has(String(id)));
+}
+
 function isRollEvent(event) {
-  return String(event.type).startsWith("roll.");
+  return String(event?.type ?? "").startsWith("roll.");
 }
 
 function isCorrectionEvent(event) {
-  return String(event.type).includes("correct") || String(event.type).includes("manual");
+  const type = String(event?.type ?? "");
+  return type.includes("correct") || type.includes("manual");
 }
 
-function publicParticipantName(participant, share, nextEnemyIndex) {
-  if (participant.side === SIDES.HOSTILE) return publicEnemyName(participant, share, nextEnemyIndex);
-  return participant.name;
+// Source and affected participant of an event. Damage or healing on oneself has no separate source.
+export function eventActors(event) {
+  const targetId = targetCombatantId(event);
+  const sourceId = sourceCombatantId(event);
+  return { sourceId: sourceId && sourceId !== targetId ? sourceId : "", targetId };
 }
 
-function publicEnemyName(row, share, nextEnemyIndex) {
-  if (share.includeNpcNames || !share.anonymizeEnemies) return row.name;
-  return `Enemy ${nextEnemyIndex()}`;
+function eventEntry(event, index) {
+  return { event, index, round: event.round, amount: eventAmount(event), ...eventActors(event) };
+}
+
+// Each drop to 0 HP once. A hit point change that confirms a chat application belongs to that application.
+export function downIncidents(events) {
+  return incidents(events, (event) => isDowned(event));
+}
+
+// Healing that brought a participant back from 0 HP.
+function rescueIncidents(events) {
+  return incidents(events, (event, original) => {
+    if (!isResourceDelta(event)) return false;
+    const { oldValue, newValue, resourcePath = "" } = event.data ?? {};
+    if (oldValue === null || oldValue === undefined || oldValue === "" || Number(oldValue) !== 0 || !(Number(newValue) > 0)) return false;
+    if (/temp|max/i.test(String(resourcePath))) return false;
+    return event.data?.interpretedAs === RESOURCE_INTERPRETATIONS.HEALING || Boolean(original && isHealingApplied(original));
+  });
+}
+
+function incidents(events, matches) {
+  const byId = new Map(events.filter((event) => event?.id).map((event) => [event.id, event]));
+  const found = new Map();
+  events.forEach((event, index) => {
+    const original = byId.get(event.data?.duplicateOfEventId) ?? null;
+    if (!matches(event, original)) return;
+    const key = original?.id ?? event.data?.duplicateOfEventId ?? event.id ?? `index-${index}`;
+    if (found.has(key)) return;
+    const primary = original ?? event;
+    const own = eventActors(primary);
+    const detected = eventActors(event);
+    const targetId = own.targetId || detected.targetId;
+    if (!targetId) return;
+    const sourceId = own.sourceId || detected.sourceId;
+    found.set(key, { event: primary, events: [primary, event], index, round: primary.round ?? event.round, targetId, sourceId: sourceId !== targetId ? sourceId : "" });
+  });
+  return Array.from(found.values());
+}
+
+function reportSummary(ctx) {
+  const stats = ctx.stats;
+  const sides = stats?.dpr?.bySide ?? stats?.bySide ?? [];
+  const sideRow = (side) => sides.find((row) => row.id === side || row.side === side);
+  const party = sideRow(SIDES.FRIENDLY);
+  const enemies = sideRow(SIDES.HOSTILE);
+  const eventRounds = ctx.events.map((event) => Number(event.round) || 0);
+  return {
+    rounds: Math.max(toNumber(stats?.summary?.rounds), 0, ...eventRounds),
+    netDamageApplied: toNumber(party?.damageAppliedNet ?? stats?.summary?.netDamageApplied),
+    netHealingApplied: toNumber(party?.healingNet ?? stats?.summary?.netHealingApplied),
+    partyDPR: toNumber(stats?.dpr?.partyDPR),
+    enemyDamage: ctx.includeEnemyStats ? toNumber(enemies?.damageAppliedNet) : null,
+    enemyDPR: ctx.includeEnemyStats ? toNumber(stats?.dpr?.enemyDPR) : null,
+    defeatedEnemies: new Set(ctx.downs.filter((down) => isEnemy(ctx, down.targetId)).map((down) => down.targetId)).size,
+    partyDowns: ctx.downs.filter((down) => isParty(ctx, down.targetId)).length,
+    unclassifiedDeltas: ctx.share.includeUnclearEvents ? toNumber(stats?.summary?.unclassifiedDeltas) : null
+  };
+}
+
+function sideOf(ctx, id) {
+  return ctx.participants.get(id)?.side ?? SIDES.UNKNOWN;
+}
+
+function isParty(ctx, id) {
+  return Boolean(id) && sideOf(ctx, id) === SIDES.FRIENDLY;
+}
+
+function isEnemy(ctx, id) {
+  return Boolean(id) && sideOf(ctx, id) === SIDES.HOSTILE;
+}
+
+function nameOf(ctx, id, fallbackKey = SOMEONE_FALLBACK) {
+  return ctx.participants.get(id)?.name ?? localize(fallbackKey);
+}
+
+function partyMembers(ctx) {
+  return Array.from(ctx.participants.values()).filter((participant) => participant.side === SIDES.FRIENDLY);
+}
+
+// Item or spell name, unless it came from a whispered roll the GM did not share.
+function actionOf(ctx, ...events) {
+  for (const event of events) {
+    const rollId = event?.data?.correlation?.rollEventId;
+    if (rollId && ctx.privateRollIds.has(rollId)) continue;
+    const name = actionName(event);
+    if (name) return name;
+  }
+  return "";
+}
+
+function effectName(event) {
+  return String(event?.data?.name ?? "").trim() || actionName(event);
+}
+
+function memberTotals(ctx, member) {
+  const row = (ctx.stats?.dpr?.byCombatant ?? ctx.stats?.byCombatant ?? []).find((entry) => String(entry.id) === member.id);
+  if (row) {
+    return {
+      damage: toNumber(row.damageAppliedNet),
+      healing: toNumber(row.healingNet ?? row.healingAppliedNet),
+      dpr: toNumber(row.netDPR)
+    };
+  }
+  const own = ctx.entries.filter((entry) => entry.sourceId === member.id);
+  const damage = sum(own.filter((entry) => isDamageDealt(entry.event)));
+  return {
+    damage,
+    healing: sum(own.filter((entry) => isHealingApplied(entry.event))),
+    dpr: ctx.summary.rounds ? Math.round((damage / ctx.summary.rounds) * 100) / 100 : 0
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sections
+
+const SECTION_BUILDERS = Object.freeze({
+  combatRecap: recapLines,
+  partyContributions: contributionLines,
+  martialHighlights: martialLines,
+  spellwork: spellLines,
+  healingSupport: healingLines,
+  controlPlays: controlLines,
+  closeCalls: closeCallLines,
+  damageSpotlight: spotlightLines,
+  heroMoments: heroMomentLines,
+  enemyPressure: enemyPressureLines,
+  tacticalTurningPoints: turningPointLines,
+  supportSaves: supportLines,
+  aftermath: aftermathLines
+});
+
+function recapLines(ctx) {
+  const { summary } = ctx;
+  const lines = [plural(summary.rounds, "SCLS.Report.Recap.DamageOne", "SCLS.Report.Recap.DamageOther", { damage: formatNumber(summary.netDamageApplied) })];
+  if (summary.netHealingApplied > 0) lines.push(format("SCLS.Report.Recap.Healing", { healing: formatNumber(summary.netHealingApplied) }));
+  if (summary.partyDPR > 0) lines.push(format("SCLS.Report.Recap.Pace", { dpr: formatNumber(summary.partyDPR) }));
+  if (summary.defeatedEnemies > 0) lines.push(plural(summary.defeatedEnemies, "SCLS.Report.Recap.DefeatedOne", "SCLS.Report.Recap.DefeatedOther"));
+  if (summary.partyDowns > 0) lines.push(plural(summary.partyDowns, "SCLS.Report.Recap.PartyDownOne", "SCLS.Report.Recap.PartyDownOther"));
+  if (summary.unclassifiedDeltas > 0) lines.push(plural(summary.unclassifiedDeltas, "SCLS.Report.Recap.UnclearOne", "SCLS.Report.Recap.UnclearOther"));
+  return lines;
+}
+
+function contributionLines(ctx) {
+  return partyMembers(ctx).map((member) => {
+    const own = ctx.entries.filter((entry) => entry.sourceId === member.id);
+    const totals = memberTotals(ctx, member);
+    const counts = [
+      [own.filter((entry) => isMartial(entry.event)).length, "SCLS.Report.Count.MeleeOne", "SCLS.Report.Count.MeleeOther"],
+      [own.filter((entry) => isRanged(entry.event)).length, "SCLS.Report.Count.RangedOne", "SCLS.Report.Count.RangedOther"],
+      [own.filter((entry) => isMagic(entry.event)).length, "SCLS.Report.Count.SpellOne", "SCLS.Report.Count.SpellOther"],
+      [own.filter((entry) => isControl(entry.event)).length, "SCLS.Report.Count.ControlOne", "SCLS.Report.Count.ControlOther"],
+      [ctx.downs.filter((down) => down.sourceId === member.id && isEnemy(ctx, down.targetId)).length, "SCLS.Report.Count.DefeatOne", "SCLS.Report.Count.DefeatOther"]
+    ];
+    const details = [];
+    if (totals.damage > 0) details.push(format("SCLS.Report.Count.Damage", { amount: formatNumber(totals.damage) }));
+    if (totals.healing > 0) details.push(format("SCLS.Report.Count.Healing", { amount: formatNumber(totals.healing) }));
+    for (const [count, oneKey, otherKey] of counts) if (count > 0) details.push(plural(count, oneKey, otherKey));
+    if (!details.length) return format("SCLS.Report.Contribution.Quiet", { name: member.name });
+    return format("SCLS.Report.Contribution.Line", { name: member.name, details: joinList(details) });
+  });
+}
+
+function martialLines(ctx) {
+  const hits = ctx.entries.filter((entry) => (isMartial(entry.event) || isRanged(entry.event)) && isParty(ctx, entry.sourceId));
+  return topByAmount(hits, 3).map((entry) => hitLine(ctx, entry));
+}
+
+function spellLines(ctx) {
+  const hits = ctx.entries.filter((entry) => isMagic(entry.event) && isParty(ctx, entry.sourceId) && entry.amount > 0);
+  const groups = new Map();
+  for (const entry of hits) {
+    const action = actionOf(ctx, entry.event);
+    if (!action) continue;
+    const key = `${entry.round ?? ""}|${entry.sourceId}|${action.toLowerCase()}`;
+    const group = groups.get(key) ?? { round: entry.round, sourceId: entry.sourceId, action, total: 0, targets: new Set(), entries: [] };
+    group.total += entry.amount;
+    group.targets.add(entry.targetId || entry.event.id);
+    group.entries.push(entry);
+    groups.set(key, group);
+  }
+  const areas = Array.from(groups.values()).filter((group) => group.targets.size > 1).sort((left, right) => right.total - left.total).slice(0, 3);
+  const covered = new Set(areas.flatMap((group) => group.entries));
+  const areaLines = areas.map((group) => ({
+    index: group.entries[0].index,
+    line: roundLine(group.round, format("SCLS.Report.Hit.Area", {
+      source: nameOf(ctx, group.sourceId),
+      count: formatNumber(group.targets.size),
+      action: group.action,
+      amount: formatNumber(group.total)
+    }))
+  }));
+  const singleLines = topByAmount(hits.filter((entry) => !covered.has(entry)), 5 - areaLines.length).map((entry) => ({ index: entry.index, line: hitLine(ctx, entry) }));
+  return [...areaLines, ...singleLines].sort((left, right) => left.index - right.index).map((entry) => entry.line);
+}
+
+function healingEntries(ctx) {
+  return ctx.entries.filter((entry) => isHealingApplied(entry.event) && entry.amount > 0 && (isParty(ctx, entry.sourceId) || (!entry.sourceId && isParty(ctx, entry.targetId))));
+}
+
+function healingLines(ctx) {
+  return topByAmount(healingEntries(ctx), 4).map((entry) => roundLine(entry.round, healingSentence({
+    source: entry.sourceId ? nameOf(ctx, entry.sourceId) : "",
+    target: nameOf(ctx, entry.targetId, TARGET_FALLBACK),
+    amount: formatNumber(entry.amount),
+    action: actionOf(ctx, entry.event)
+  })));
+}
+
+function controlLines(ctx) {
+  return ctx.entries.filter((entry) => isControl(entry.event) && isParty(ctx, entry.sourceId)).slice(0, 5).map((entry) => controlLine(ctx, entry));
+}
+
+function closeCallLines(ctx) {
+  return ctx.downs.filter((down) => isParty(ctx, down.targetId)).slice(0, 5).map((down) => downLine(ctx, down));
+}
+
+function spotlightLines(ctx) {
+  return partyMembers(ctx)
+    .map((member) => ({ member, totals: memberTotals(ctx, member) }))
+    .filter(({ totals }) => totals.damage > 0)
+    .sort((left, right) => right.totals.damage - left.totals.damage)
+    .slice(0, 5)
+    .map(({ member, totals }) => format("SCLS.Report.Spotlight.Line", { name: member.name, damage: formatNumber(totals.damage), dpr: formatNumber(totals.dpr) }));
+}
+
+function heroMomentLines(ctx) {
+  const defeats = ctx.downs
+    .filter((down) => isParty(ctx, down.sourceId) && isEnemy(ctx, down.targetId))
+    .map((down) => {
+      const action = actionOf(ctx, ...down.events);
+      const data = { source: nameOf(ctx, down.sourceId), target: nameOf(ctx, down.targetId, TARGET_FALLBACK), action };
+      return roundLine(down.round, format(action ? "SCLS.Report.Defeat.With" : "SCLS.Report.Defeat.Plain", data));
+    });
+  const crits = ctx.entries
+    .filter((entry) => isCritical(entry.event) && isParty(ctx, entry.sourceId))
+    .map((entry) => {
+      const action = actionOf(ctx, entry.event);
+      return roundLine(entry.round, format(action ? "SCLS.Report.Crit.With" : "SCLS.Report.Crit.Plain", { source: nameOf(ctx, entry.sourceId), action }));
+    });
+  const bestHits = partyMembers(ctx)
+    .map((member) => topByAmount(ctx.entries.filter((entry) => isDamageDealt(entry.event) && entry.sourceId === member.id && !ctx.downEvents.has(entry.event)), 1)[0])
+    .filter(Boolean)
+    .sort((left, right) => left.index - right.index)
+    .map((entry) => hitLine(ctx, entry));
+  return unique([...defeats, ...crits, ...bestHits]).slice(0, 6);
+}
+
+function enemyPressureLines(ctx) {
+  const lines = [];
+  const { enemyDamage, enemyDPR } = ctx.summary;
+  if (enemyDamage > 0 || enemyDPR > 0) lines.push(format("SCLS.Report.Enemy.Totals", { damage: formatNumber(enemyDamage), dpr: formatNumber(enemyDPR) }));
+  if (!ACTION_DETAIL_MODES.has(ctx.mode)) return lines;
+  const downs = ctx.downs.filter((down) => isParty(ctx, down.targetId) && isEnemy(ctx, down.sourceId)).map((down) => downLine(ctx, down));
+  const hits = topByAmount(ctx.entries.filter((entry) => isDamageApplied(entry.event) && isParty(ctx, entry.targetId) && (isEnemy(ctx, entry.sourceId) || !entry.sourceId) && !ctx.downEvents.has(entry.event)), 3)
+    .map((entry) => hitLine(ctx, entry));
+  const controls = ctx.entries.filter((entry) => isControl(entry.event) && isEnemy(ctx, entry.sourceId) && isParty(ctx, entry.targetId)).slice(0, 2)
+    .map((entry) => controlLine(ctx, entry));
+  return [...lines, ...unique([...downs, ...hits, ...controls]).slice(0, 6)];
+}
+
+function turningPointLines(ctx) {
+  const rounds = new Map();
+  const bucket = (round) => {
+    const number = Number(round) || 0;
+    if (!rounds.has(number)) rounds.set(number, { round: number, damage: 0, healing: 0, defeats: 0, downs: 0, control: 0 });
+    return rounds.get(number);
+  };
+  const healing = new Set(healingEntries(ctx));
+  for (const entry of ctx.entries) {
+    if (!(Number(entry.round) > 0)) continue;
+    if (isDamageDealt(entry.event) && isParty(ctx, entry.sourceId)) bucket(entry.round).damage += entry.amount;
+    if (healing.has(entry)) bucket(entry.round).healing += entry.amount;
+    if (isControl(entry.event) && isParty(ctx, entry.sourceId)) bucket(entry.round).control += 1;
+  }
+  for (const down of ctx.downs) {
+    if (!(Number(down.round) > 0)) continue;
+    if (isEnemy(ctx, down.targetId)) bucket(down.round).defeats += 1;
+    else if (isParty(ctx, down.targetId)) bucket(down.round).downs += 1;
+  }
+  return Array.from(rounds.values())
+    .map((round) => ({ ...round, score: round.damage + round.healing + (25 * round.defeats) + (15 * round.downs) + (10 * round.control) }))
+    .filter((round) => round.score > 0)
+    .sort((left, right) => (right.score - left.score) || (left.round - right.round))
+    .slice(0, 3)
+    .sort((left, right) => left.round - right.round)
+    .map((round) => roundLine(round.round, format("SCLS.Report.Turning.Line", { parts: joinList(turningParts(round)) })));
+}
+
+function turningParts(round) {
+  const parts = [];
+  if (round.damage > 0) parts.push(format("SCLS.Report.Count.PartyDamage", { amount: formatNumber(round.damage) }));
+  if (round.defeats > 0) parts.push(plural(round.defeats, "SCLS.Report.Count.DefeatOne", "SCLS.Report.Count.DefeatOther"));
+  if (round.downs > 0) parts.push(plural(round.downs, "SCLS.Report.Count.DownOne", "SCLS.Report.Count.DownOther"));
+  if (round.control > 0) parts.push(plural(round.control, "SCLS.Report.Count.ControlOne", "SCLS.Report.Count.ControlOther"));
+  if (round.healing > 0) parts.push(format("SCLS.Report.Count.PartyHealing", { amount: formatNumber(round.healing) }));
+  return parts;
+}
+
+function supportLines(ctx) {
+  const rescues = rescueIncidents(ctx.events)
+    .filter((rescue) => isParty(ctx, rescue.targetId) && (!rescue.sourceId || isParty(ctx, rescue.sourceId)))
+    .slice(0, 4)
+    .map((rescue) => {
+      const target = nameOf(ctx, rescue.targetId, TARGET_FALLBACK);
+      if (!rescue.sourceId) return roundLine(rescue.round, format("SCLS.Report.Rescue.Self", { target }));
+      const action = actionOf(ctx, ...rescue.events);
+      return roundLine(rescue.round, format(action ? "SCLS.Report.Rescue.With" : "SCLS.Report.Rescue.Plain", { source: nameOf(ctx, rescue.sourceId), target, action }));
+    });
+  const buffs = ctx.entries
+    .filter((entry) => entry.event.type === EVENT_TYPES.ACTIVE_EFFECT_CREATED && !isControl(entry.event) && effectName(entry.event))
+    .filter((entry) => isParty(ctx, entry.sourceId) && isParty(ctx, entry.targetId))
+    .slice(0, 4)
+    .map((entry) => roundLine(entry.round, format("SCLS.Report.Buff.Named", {
+      source: nameOf(ctx, entry.sourceId),
+      target: nameOf(ctx, entry.targetId, TARGET_FALLBACK),
+      effect: effectName(entry.event)
+    })));
+  return unique([...rescues, ...buffs]).slice(0, 6);
+}
+
+function aftermathLines(ctx) {
+  const lines = [];
+  if (ctx.summary.rounds > 0) lines.push(plural(ctx.summary.rounds, "SCLS.Report.Aftermath.RoundsOne", "SCLS.Report.Aftermath.RoundsOther"));
+  const members = partyMembers(ctx);
+  const down = members.filter((member) => isDownAtEnd(ctx, member.id));
+  const standing = members.filter((member) => !down.includes(member));
+  if (standing.length) lines.push(format("SCLS.Report.Aftermath.Standing", { names: joinList(standing.map((member) => member.name)) }));
+  if (down.length) lines.push(format("SCLS.Report.Aftermath.Down", { names: joinList(down.map((member) => member.name)) }));
+  if (ctx.includeEnemyStats) {
+    const enemies = Array.from(ctx.participants.values()).filter((participant) => participant.side === SIDES.HOSTILE);
+    if (enemies.length) lines.push(format("SCLS.Report.Aftermath.Enemies", { defeated: formatNumber(ctx.summary.defeatedEnemies), total: formatNumber(enemies.length) }));
+  }
+  return lines;
+}
+
+// Down at the end when no healing reached the participant after the last drop to 0 HP.
+function isDownAtEnd(ctx, id) {
+  const lastDown = Math.max(-1, ...ctx.downs.filter((down) => down.targetId === id).map((down) => down.index));
+  if (lastDown < 0) return false;
+  const lastHealing = Math.max(-1, ...ctx.entries.filter((entry) => entry.targetId === id && entry.amount > 0 && isHealingApplied(entry.event)).map((entry) => entry.index));
+  return lastHealing < lastDown;
+}
+
+function hitLine(ctx, entry) {
+  return roundLine(entry.round, damageSentence({
+    source: entry.sourceId ? nameOf(ctx, entry.sourceId) : "",
+    target: nameOf(ctx, entry.targetId, entry.sourceId ? TARGET_FALLBACK : SOMEONE_FALLBACK),
+    amount: formatNumber(entry.amount),
+    action: actionOf(ctx, entry.event)
+  }));
+}
+
+function controlLine(ctx, entry) {
+  return roundLine(entry.round, controlSentence({
+    source: nameOf(ctx, entry.sourceId),
+    target: nameOf(ctx, entry.targetId, TARGET_FALLBACK),
+    effect: effectName(entry.event)
+  }));
+}
+
+function downLine(ctx, down) {
+  return roundLine(down.round, downSentence({
+    source: down.sourceId ? nameOf(ctx, down.sourceId) : "",
+    target: nameOf(ctx, down.targetId, TARGET_FALLBACK),
+    action: down.sourceId ? actionOf(ctx, ...down.events) : ""
+  }));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sentence builders, shared with the Markdown export.
+
+export function roundLine(round, text) {
+  const number = Number(round) || 0;
+  return number > 0 ? format("SCLS.Report.RoundLine", { round: formatNumber(number), text }) : text;
+}
+
+export function damageSentence({ source = "", target = "", amount = "", action = "" } = {}) {
+  if (!source) return format("SCLS.Report.Hit.Taken", { target, amount });
+  return format(action ? "SCLS.Report.Hit.With" : "SCLS.Report.Hit.Plain", { source, target, amount, action });
+}
+
+export function healingSentence({ source = "", target = "", amount = "", action = "" } = {}) {
+  if (!source) return format(action ? "SCLS.Report.Heal.SelfWith" : "SCLS.Report.Heal.Self", { target, amount, action });
+  return format(action ? "SCLS.Report.Heal.With" : "SCLS.Report.Heal.Plain", { source, target, amount, action });
+}
+
+export function controlSentence({ source = "", target = "", effect = "" } = {}) {
+  if (!source) return effect ? format("SCLS.Report.Control.Received", { target, effect }) : "";
+  return format(effect ? "SCLS.Report.Control.Named" : "SCLS.Report.Control.Unnamed", { source, target, effect });
+}
+
+export function downSentence({ source = "", target = "", action = "" } = {}) {
+  if (!source) return format("SCLS.Report.Down.Plain", { target });
+  return format(action ? "SCLS.Report.Down.BySourceWith" : "SCLS.Report.Down.BySource", { source, target, action });
+}
+
+export function formatNumber(value) {
+  const number = Number(value) || 0;
+  try {
+    return new Intl.NumberFormat(activeLocale(), { maximumFractionDigits: 2 }).format(number);
+  } catch {
+    return String(Math.round(number * 100) / 100);
+  }
+}
+
+function plural(count, oneKey, otherKey, data = {}) {
+  return format(Number(count) === 1 ? oneKey : otherKey, { ...data, count: formatNumber(count) });
+}
+
+function joinList(items) {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} ${localize("SCLS.Report.ListAnd")} ${items.at(-1)}`;
+}
+
+// The biggest entries, told in the order they happened.
+function topByAmount(entries, limit) {
+  return entries
+    .filter((entry) => entry.amount > 0)
+    .sort((left, right) => (right.amount - left.amount) || (left.index - right.index))
+    .slice(0, Math.max(0, limit))
+    .sort((left, right) => left.index - right.index);
+}
+
+function sum(entries) {
+  return entries.reduce((total, entry) => total + entry.amount, 0);
+}
+
+function unique(lines) {
+  return Array.from(new Set(lines.filter(Boolean)));
+}
+
+function toNumber(value) {
+  return Number(value) || 0;
 }
 
 function markdownToHtml(markdown) {
@@ -605,4 +739,4 @@ function markdownToHtml(markdown) {
   }).join("\n");
 }
 
-export const __test__ = { normalizeReportSections, visibleParticipants, visibleDprRows, visibleTimeline, reportSummary, isCorrectionEvent };
+export const __test__ = { normalizeReportSections, reportContext, participantDirectory, shareableEvents, journalOwnership, rescueIncidents, isCorrectionEvent };

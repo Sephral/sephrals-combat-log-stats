@@ -1,43 +1,128 @@
-import { CONFIDENCE } from "../constants.js";
+import { CONFIDENCE, EVENT_TYPES, RESOURCE_INTERPRETATIONS } from "../constants.js";
 
+// Fallback attribution for hit point changes that no system hook explained: find the damage or healing
+// roll that most likely caused the change. Rolls are grouped per chat message, so multi part damage
+// (for example slashing plus fire) is compared as one total.
 export class CorrelationService {
   constructor({ windowMs = 60000 } = {}) {
     this.windowMs = windowMs;
   }
 
   correlateResourceDelta(log, deltaEvent) {
-    const created = new Date(deltaEvent.createdAt).getTime();
-    const candidates = (log.events ?? []).map((event) => {
-      if (!event.type?.startsWith("roll.")) return false;
-      const eventTime = new Date(event.createdAt).getTime();
-      if (!Number.isFinite(eventTime) || Math.abs(created - eventTime) > this.windowMs) return false;
-      const score = correlationScore(event, deltaEvent);
-      return score === null ? false : { event, score };
-    }).filter(Boolean);
+    const interpretation = deltaEvent?.data?.interpretedAs;
+    const rollType = interpretation === RESOURCE_INTERPRETATIONS.DAMAGE ? EVENT_TYPES.ROLL_DAMAGE
+      : interpretation === RESOURCE_INTERPRETATIONS.HEALING ? EVENT_TYPES.ROLL_HEALING
+        : null;
+    if (!rollType) return uncorrelated("Only damage and healing are matched to rolls.");
 
-    if (!candidates.length) return { status: "uncorrelated", rollEventId: null, candidateRollEventIds: [], confidence: CONFIDENCE.UNCLEAR, reason: "No nearby roll event matched this resource delta." };
+    const created = new Date(deltaEvent.createdAt).getTime();
+    const used = usedRolls(log, deltaEvent);
+    const groups = rollGroups(log, rollType, created, this.windowMs, deltaEvent.id)
+      .filter((group) => !used.has(group.messageId) && !used.has(group.firstEventId));
+    const candidates = groups
+      .map((group) => ({ group, score: correlationScore(group, deltaEvent, interpretation) }))
+      .filter((candidate) => candidate.score !== null);
+    if (!candidates.length) return uncorrelated("No nearby roll matched this hit point change.");
+
     const bestScore = Math.max(...candidates.map((candidate) => candidate.score));
-    const bestCandidates = candidates.filter((candidate) => candidate.score === bestScore);
-    if (bestCandidates.length > 1) return { status: "ambiguous", rollEventId: null, candidateRollEventIds: bestCandidates.map((candidate) => candidate.event.id), confidence: CONFIDENCE.UNCLEAR, reason: "Multiple nearby roll events could explain this resource delta." };
-    return { status: "correlated", rollEventId: bestCandidates[0].event.id, candidateRollEventIds: [bestCandidates[0].event.id], confidence: CONFIDENCE.PROBABLE, reason: "One nearby roll event matched this resource delta." };
+    const best = candidates.filter((candidate) => candidate.score === bestScore);
+    // Weak evidence (only a capped amount) needs a single candidate.
+    if (best.length > 1 || (bestScore < 2 && candidates.length > 1)) {
+      return {
+        status: "ambiguous",
+        rollEventId: null,
+        candidateRollEventIds: best.map((candidate) => candidate.group.firstEventId),
+        confidence: CONFIDENCE.UNCLEAR,
+        reason: "Several nearby rolls could explain this hit point change."
+      };
+    }
+    const group = best[0].group;
+    return {
+      status: "correlated",
+      rollEventId: group.firstEventId,
+      messageId: group.messageId,
+      candidateRollEventIds: [group.firstEventId],
+      // A capped amount without targets is only a suggestion for the GM, not an attribution.
+      confidence: bestScore >= 2 ? CONFIDENCE.PROBABLE : CONFIDENCE.UNCLEAR,
+      reason: "One nearby roll matched this hit point change."
+    };
   }
 }
 
-function correlationScore(event, deltaEvent) {
-  const explicitActorTarget = deltaEvent.actorUuid && event.data?.targetActorUuids?.includes(deltaEvent.actorUuid);
-  const explicitTokenTarget = deltaEvent.tokenUuid && event.data?.targetTokenUuids?.includes(deltaEvent.tokenUuid);
-  const matchingAmount = rollAmount(event) > 0 && rollAmount(event) === deltaAmount(deltaEvent);
-  if (explicitActorTarget || explicitTokenTarget) return matchingAmount ? 4 : 3;
-  if (matchingAmount && event.actorUuid && deltaEvent.actorUuid && event.actorUuid !== deltaEvent.actorUuid) return 2;
-  if (matchingAmount) return 1;
-  if (deltaEvent.actorUuid && event.actorUuid && deltaEvent.actorUuid === event.actorUuid) return 0;
+function uncorrelated(reason) {
+  return { status: "uncorrelated", rollEventId: null, candidateRollEventIds: [], confidence: CONFIDENCE.UNCLEAR, reason };
+}
+
+// A roll explains the hit point change of a target once. A later change of the same target, such as a GM
+// edit or regeneration, must not be credited to a roll that was already applied. Temporary and regular
+// hit points that change in the same update share their roll.
+function usedRolls(log, deltaEvent) {
+  const used = new Set();
+  const target = targetKey(deltaEvent);
+  if (!target) return used;
+  for (const event of log?.events ?? []) {
+    if (event.id === deltaEvent.id || event.type !== EVENT_TYPES.RESOURCE_DELTA || event.ignored) continue;
+    if (deltaEvent.data?.updateId && event.data?.updateId === deltaEvent.data.updateId) continue;
+    if (targetKey(event) !== target) continue;
+    const correlation = event.data?.correlation;
+    if (!correlation || correlation.status === "ambiguous" || correlation.status === "uncorrelated") continue;
+    if (correlation.messageId) used.add(String(correlation.messageId));
+    if (correlation.rollEventId) used.add(String(correlation.rollEventId));
+  }
+  return used;
+}
+
+function targetKey(event) {
+  return event?.data?.targetCombatantId || event?.data?.targetActorUuid || "";
+}
+
+function rollGroups(log, rollType, created, windowMs, excludeId) {
+  const groups = new Map();
+  for (const event of log?.events ?? []) {
+    if (event.id === excludeId || event.type !== rollType || event.ignored) continue;
+    const time = new Date(event.createdAt).getTime();
+    if (!Number.isFinite(time) || !Number.isFinite(created) || Math.abs(created - time) > windowMs) continue;
+    const key = String(event.source?.id || event.id);
+    const group = groups.get(key) ?? {
+      messageId: event.source?.id ?? "",
+      firstEventId: event.id,
+      combatantId: event.combatantId ?? "",
+      actorUuid: event.actorUuid ?? "",
+      tokenUuid: event.tokenUuid ?? "",
+      total: 0,
+      targetCombatantIds: new Set(),
+      targetActorUuids: new Set(),
+      targetTokenUuids: new Set()
+    };
+    group.total += Math.abs(Number(event.data?.total ?? event.data?.amount ?? 0)) || 0;
+    for (const id of event.data?.targetCombatantIds ?? []) group.targetCombatantIds.add(id);
+    for (const uuid of event.data?.targetActorUuids ?? []) group.targetActorUuids.add(uuid);
+    for (const uuid of event.data?.targetTokenUuids ?? []) group.targetTokenUuids.add(uuid);
+    groups.set(key, group);
+  }
+  return Array.from(groups.values());
+}
+
+function correlationScore(group, deltaEvent, interpretation) {
+  const amount = Math.abs(Number(deltaEvent?.data?.delta ?? deltaEvent?.data?.amount ?? 0)) || 0;
+  if (!amount || !group.total) return null;
+  const targetId = deltaEvent.data?.targetCombatantId || deltaEvent.combatantId || "";
+  const targeted = (targetId && group.targetCombatantIds.has(targetId))
+    || (deltaEvent.tokenUuid && group.targetTokenUuids.has(deltaEvent.tokenUuid))
+    || (deltaEvent.actorUuid && group.targetActorUuids.has(deltaEvent.actorUuid));
+  const sameCombatant = Boolean(targetId && group.combatantId && targetId === group.combatantId);
+  // Nobody damages themselves by accident; self healing is common.
+  if (interpretation === RESOURCE_INTERPRETATIONS.DAMAGE && sameCombatant && !targeted) return null;
+
+  const exact = group.total === amount;
+  // Damage stops at 0 hit points, so a killing blow removes less than was rolled.
+  const capped = interpretation === RESOURCE_INTERPRETATIONS.DAMAGE
+    ? Number(deltaEvent.data?.newValue) === 0 && group.total > amount
+    : group.total > amount;
+  if (targeted && exact) return 5;
+  if (targeted && capped) return 4;
+  if (targeted) return 3;
+  if (exact) return 2;
+  if (capped) return 1;
   return null;
-}
-
-function rollAmount(event) {
-  return Math.abs(Number(event?.data?.total ?? event?.data?.amount ?? 0)) || 0;
-}
-
-function deltaAmount(event) {
-  return Math.abs(Number(event?.data?.delta ?? event?.data?.amount ?? event?.data?.total ?? 0)) || 0;
 }

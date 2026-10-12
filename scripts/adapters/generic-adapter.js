@@ -52,17 +52,30 @@ export class GenericSystemAdapter {
   classifyRoll(roll, message) {
     const flavor = String(message?.flavor ?? message?.content ?? "").toLowerCase();
     const formula = String(roll?.formula ?? "").toLowerCase();
+    if (/initiative/.test(flavor)) return { type: EVENT_TYPES.ROLL_OTHER, confidence: CONFIDENCE.PROBABLE };
     if (/heal|healing|cure/.test(flavor)) return { type: EVENT_TYPES.ROLL_HEALING, confidence: CONFIDENCE.PROBABLE };
-    if (/damage|dmg/.test(flavor) || /\d+d\d+/.test(formula)) return { type: EVENT_TYPES.ROLL_DAMAGE, confidence: CONFIDENCE.UNCLEAR };
+    if (/damage|dmg/.test(flavor)) return { type: EVENT_TYPES.ROLL_DAMAGE, confidence: CONFIDENCE.PROBABLE };
     if (/attack|hit/.test(flavor)) return { type: EVENT_TYPES.ROLL_ATTACK, confidence: CONFIDENCE.UNCLEAR };
     if (/save|saving throw/.test(flavor)) return { type: EVENT_TYPES.ROLL_SAVE, confidence: CONFIDENCE.UNCLEAR };
     if (/check|skill|ability/.test(flavor)) return { type: EVENT_TYPES.ROLL_CHECK, confidence: CONFIDENCE.UNCLEAR };
+    // d20 rolls are tests, not damage. Other dice formulas without a hint may still be damage.
+    if (/\d*d20\b/.test(formula)) return { type: EVENT_TYPES.ROLL_OTHER, confidence: CONFIDENCE.UNCLEAR };
+    if (/\d+d\d+/.test(formula)) return { type: EVENT_TYPES.ROLL_DAMAGE, confidence: CONFIDENCE.UNCLEAR };
     return { type: EVENT_TYPES.ROLL_OTHER, confidence: CONFIDENCE.UNCLEAR };
   }
+
+  // Systems without known flags only offer the flavor text as action name.
+  describeAction(message) {
+    const flavor = String(message?.flavor ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    return { actionName: flavor.length <= 60 ? flavor : "", actionKind: "other" };
+  }
+
+  registerSystemHooks() {}
 
   extractRollData(roll, message = null) {
     const targets = this.extractMessageTargets(message);
     return {
+      ...this.describeAction(message),
       formula: String(roll?.formula ?? ""),
       total: numberOrNull(roll?.total),
       dice: Array.from(roll?.dice ?? []).map((die) => ({ faces: die.faces, results: (die.results ?? []).map((result) => result.result) })),

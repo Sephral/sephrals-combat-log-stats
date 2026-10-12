@@ -1,5 +1,5 @@
 import { CONFIDENCE, LOG_STATUS, MODULE_ID, SCHEMA_VERSION, SEGMENT_REASONS, SHARE_MODES, SIDES, VISIBILITY } from "../constants.js";
-import { cloneData, generateId, isoNow } from "../utils.js";
+import { cloneData, format, generateId, isoNow, localize } from "../utils.js";
 
 export function defaultShareSettings() {
   return {
@@ -38,23 +38,35 @@ export function closeCurrentSegment(log, reason = SEGMENT_REASONS.UNKNOWN, now =
 export function snapshotParticipant(combatant, adapter) {
   const actor = combatant?.actor ?? null;
   const token = combatant?.token ?? combatant?.token?.object ?? null;
-  const disposition = Number(token?.disposition ?? combatant?.token?.disposition ?? 0);
+  const rawDisposition = token?.disposition ?? combatant?.token?.disposition;
+  const disposition = rawDisposition === undefined || rawDisposition === null ? null : Number(rawDisposition);
   return {
     combatantId: combatant?.id ?? "",
     actorUuid: actor?.uuid ?? combatant?.actorUuid ?? "",
     tokenUuid: token?.document?.uuid ?? combatant?.token?.uuid ?? "",
     actorId: actor?.id ?? combatant?.actorId ?? "",
     tokenId: token?.id ?? combatant?.tokenId ?? "",
+    // Unlinked tokens share the base actor id, so only linked participants may be found by actor id.
+    actorLink: Boolean(token?.actorLink ?? combatant?.token?.actorLink ?? !token),
     name: combatant?.name ?? actor?.name ?? token?.name ?? "Unknown Combatant",
     img: combatant?.img ?? actor?.img ?? token?.texture?.src ?? "icons/svg/mystery-man.svg",
-    disposition,
+    disposition: disposition ?? 0,
+    hidden: Boolean(combatant?.hidden),
     isPlayerOwned: Boolean(actor?.hasPlayerOwner),
     isNpc: !actor?.hasPlayerOwner,
     initiative: combatant?.initiative ?? null,
-    side: disposition > 0 ? SIDES.FRIENDLY : disposition < 0 ? SIDES.HOSTILE : SIDES.UNKNOWN,
+    side: sideForDisposition(disposition),
     initialResources: actor ? adapter.snapshotResources(actor) : {},
     finalResources: null
   };
+}
+
+// Token dispositions: 1 friendly, 0 neutral, -1 hostile, -2 secret (treated as hostile).
+export function sideForDisposition(disposition) {
+  if (disposition === null || !Number.isFinite(Number(disposition))) return SIDES.UNKNOWN;
+  if (Number(disposition) > 0) return SIDES.FRIENDLY;
+  if (Number(disposition) < 0) return SIDES.HOSTILE;
+  return SIDES.NEUTRAL;
 }
 
 export function createCombatLog(combat, adapter, now = isoNow()) {
@@ -71,7 +83,7 @@ export function createCombatLog(combat, adapter, now = isoNow()) {
     combatId: combat?.id ?? "",
     combatUuid: combat?.uuid ?? "",
     sceneUuid: combat?.scene?.uuid ?? canvas?.scene?.uuid ?? "",
-    title: combat?.scene?.name ? `${combat.scene.name} Combat` : "Combat Log",
+    title: combat?.scene?.name ? format("SCLS.Log.DefaultTitle", { scene: combat.scene.name }) : localize("SCLS.Log.UntitledTitle"),
     status: LOG_STATUS.ACTIVE,
     createdAt: now,
     startedAt: now,

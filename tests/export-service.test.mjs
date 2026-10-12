@@ -1,0 +1,149 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { test } from "node:test";
+import { CONFIDENCE, EVENT_TYPES, SIDES, SOURCE_KINDS, VISIBILITY } from "../scripts/constants.js";
+
+const translations = {
+  en: JSON.parse(readFileSync(new URL("../lang/en.json", import.meta.url), "utf8")),
+  de: JSON.parse(readFileSync(new URL("../lang/de.json", import.meta.url), "utf8"))
+};
+let language = "en";
+const downloads = [];
+
+globalThis.game = {
+  user: { id: "gm-user", isGM: true },
+  i18n: {
+    get lang() {
+      return language;
+    },
+    localize: (key) => translations[language]?.[key] ?? key
+  },
+  settings: { get: () => undefined }
+};
+globalThis.foundry = { utils: { saveDataToFile: (data, type, filename) => downloads.push({ data, type, filename }) } };
+
+const { CombatLogExportService, __test__ } = await import("../scripts/services/export-service.js");
+
+const actorUpdate = { visibility: VISIBILITY.GM, source: { kind: SOURCE_KINDS.ACTOR_UPDATE, id: "actor" } };
+
+function exportLog() {
+  return {
+    id: "combat-log-1",
+    title: "Goblin Ambush",
+    status: "ended",
+    startedAt: "2026-05-17T10:00:00.000Z",
+    endedAt: "2026-05-17T10:10:00.000Z",
+    sceneUuid: "Scene.1",
+    participants: [
+      { combatantId: "aria", name: "Aria", side: SIDES.FRIENDLY, isPlayerOwned: true },
+      { combatantId: "gob2", name: "Goblin 2", side: SIDES.HOSTILE },
+      { combatantId: "gob3", name: "Goblin 3", side: SIDES.HOSTILE, hidden: true }
+    ],
+    computed: {
+      summary: { rounds: 2, netDamageApplied: 21, netHealingApplied: 4, unclassifiedDeltas: 1 },
+      dpr: { partyDPR: 7.5, enemyDPR: 3 }
+    },
+    events: [
+      { id: "start", type: EVENT_TYPES.COMBAT_STARTED, round: 1, confidence: CONFIDENCE.SAFE, source: { kind: SOURCE_KINDS.COMBAT_UPDATE }, data: { title: "Goblin Ambush" } },
+      { id: "chat", type: EVENT_TYPES.CHAT_MESSAGE_CREATED, round: 1, combatantId: "aria", confidence: CONFIDENCE.SAFE, visibility: VISIBILITY.GM, source: { kind: SOURCE_KINDS.CHAT_MESSAGE }, data: { content: "Secret whisper", speakerAlias: "" } },
+      { id: "attack", type: EVENT_TYPES.ROLL_ATTACK, round: 1, combatantId: "aria", confidence: CONFIDENCE.SAFE, visibility: VISIBILITY.PUBLIC, data: { total: 18, actionName: "Longsword" } },
+      { id: "trap", type: EVENT_TYPES.RESOURCE_DELTA, round: 1, combatantId: "gob2", confidence: CONFIDENCE.PROBABLE, ...actorUpdate, data: { resourcePath: "system.attributes.hp.value", interpretedAs: "damage", delta: -7, oldValue: 16, newValue: 9, targetCombatantId: "gob2", targetDowned: false } },
+      { id: "potion", type: EVENT_TYPES.RESOURCE_DELTA, round: 1, combatantId: "aria", confidence: CONFIDENCE.SAFE, ...actorUpdate, data: { resourcePath: "system.attributes.hp.value", interpretedAs: "healing", delta: 4, oldValue: 10, newValue: 14, targetCombatantId: "aria", actionName: "Potion of Healing" } },
+      { id: "prone", type: EVENT_TYPES.ACTIVE_EFFECT_CREATED, round: 1, combatantId: "aria", confidence: CONFIDENCE.SAFE, visibility: VISIBILITY.GM, source: { kind: SOURCE_KINDS.ACTIVE_EFFECT_UPDATE }, data: { name: "Prone", statuses: ["prone"], control: true, sourceCombatantId: "aria", targetCombatantId: "gob2" } },
+      { id: "hit", type: EVENT_TYPES.DAMAGE_APPLIED, round: 2, combatantId: "aria", confidence: CONFIDENCE.SAFE, visibility: VISIBILITY.PUBLIC, tags: ["chat-applied"], data: { amount: 9, actionName: "Longsword", actionKind: "melee", targetCombatantId: "gob2", targetName: "Goblin 2" } },
+      { id: "hit-confirm", type: EVENT_TYPES.RESOURCE_DELTA, round: 2, combatantId: "aria", confidence: CONFIDENCE.SAFE, ...actorUpdate, data: { resourcePath: "system.attributes.hp.value", interpretedAs: "ignored", duplicateOfEventId: "hit", delta: -9, oldValue: 9, newValue: 0, targetCombatantId: "gob2", sourceCombatantId: "aria", attribution: "correlatedChatRoll", targetDowned: true } },
+      { id: "ignored", type: EVENT_TYPES.DAMAGE_APPLIED, round: 2, combatantId: "aria", ignored: true, confidence: CONFIDENCE.SAFE, data: { amount: 99, targetCombatantId: "gob2" } },
+      { id: "round", type: EVENT_TYPES.ROUND_CHANGED, round: 2, confidence: CONFIDENCE.SAFE, data: {} }
+    ],
+    shareSettings: {}
+  };
+}
+
+function withLanguage(next, callback) {
+  const previous = language;
+  language = next;
+  try {
+    return callback();
+  } finally {
+    language = previous;
+  }
+}
+
+test("markdown export is a readable document with summary and actions by round", () => {
+  const markdown = new CombatLogExportService().exportMarkdown(exportLog());
+
+  assert.match(markdown, /^# Goblin Ambush$/m);
+  assert.match(markdown, /^- Status: Ended$/m);
+  assert.match(markdown, /^- Started: .+2026/m);
+  assert.match(markdown, /^- Rounds: 2$/m);
+  assert.match(markdown, /^- Aria \(Friendly\)$/m);
+  assert.match(markdown, /^- Goblin 3 \(Hostile, hidden from players\)$/m);
+  assert.match(markdown, /^- Net damage: 21$/m);
+  assert.match(markdown, /^- Net healing: 4$/m);
+  assert.match(markdown, /^- Party damage per round: 7\.5$/m);
+  assert.match(markdown, /^- Enemy damage per round: 3$/m);
+  assert.match(markdown, /^- Enemies defeated: 1$/m);
+  assert.match(markdown, /^- Party members dropped to 0 HP: 0$/m);
+  assert.match(markdown, /^- Unclear HP changes, not counted: 1$/m);
+
+  const actions = markdown.slice(markdown.indexOf("## Actions by Round"));
+  assert.deepEqual(actions.split("\n").filter((line) => line.startsWith("- ")), [
+    "- Round 1: Goblin 2 took 7 damage.",
+    "- Round 1: Aria regained 4 HP with Potion of Healing.",
+    "- Round 1: Aria afflicted Goblin 2 with Prone.",
+    "- Round 2: Aria hit Goblin 2 with Longsword for 9 damage.",
+    "- Round 2: Goblin 2 dropped to 0 HP."
+  ]);
+});
+
+test("markdown export contains no raw event types or chat content", () => {
+  const markdown = new CombatLogExportService().exportMarkdown(exportLog());
+  assert.doesNotMatch(markdown, /resource\.delta|combat\.started|chat\.messageCreated|roll\.attack|activeEffect|damage\.applied|combat\.roundChanged/);
+  assert.doesNotMatch(markdown, /Secret whisper|for 99 damage|\(safe\)|\(probable\)/);
+});
+
+test("markdown export is localized", () => {
+  const markdown = withLanguage("de", () => new CombatLogExportService().exportMarkdown(exportLog()));
+  assert.match(markdown, /^- Status: Beendet$/m);
+  assert.match(markdown, /^- Aria \(Freundlich\)$/m);
+  assert.match(markdown, /^## Aktionen nach Runden$/m);
+  assert.match(markdown, /^- Schaden der Gruppe pro Runde: 7,5$/m);
+  assert.match(markdown, /^- Runde 2: Aria traf Goblin 2 mit Longsword für 9 Schaden\.$/m);
+  assert.match(markdown, /^- Runde 2: Goblin 2 fiel auf 0 TP\.$/m);
+});
+
+test("markdown export marks running combats and empty logs", () => {
+  const log = { ...exportLog(), status: "active", endedAt: null, events: [] };
+  const markdown = __test__.renderMarkdownExport(log);
+  assert.match(markdown, /^- Status: Active$/m);
+  assert.match(markdown, /^- Ended: still running$/m);
+  assert.match(markdown, /^No damage, healing or effects were recorded\.$/m);
+});
+
+test("markdown export downloads a .md file", () => {
+  downloads.length = 0;
+  const markdown = new CombatLogExportService().exportMarkdown(exportLog());
+  assert.equal(downloads.length, 1);
+  assert.equal(downloads[0].filename, "combat-log-1.md");
+  assert.equal(downloads[0].type, "text/markdown");
+  assert.equal(downloads[0].data, markdown);
+});
+
+test("JSON export keeps the raw log", () => {
+  downloads.length = 0;
+  const log = exportLog();
+  const json = new CombatLogExportService().exportJson(log);
+  assert.deepEqual(JSON.parse(json), log);
+  assert.equal(downloads[0].filename, "combat-log-1.json");
+  assert.equal(downloads[0].type, "application/json");
+});
+
+test("exports are recorded as GM events", () => {
+  const log = exportLog();
+  new CombatLogExportService().appendExportEvent(log, "markdown");
+  const event = log.events.at(-1);
+  assert.equal(event.type, EVENT_TYPES.EXPORT_CREATED);
+  assert.equal(event.visibility, "gm");
+  assert.equal(event.userId, "gm-user");
+  assert.deepEqual(event.data, { format: "markdown" });
+});

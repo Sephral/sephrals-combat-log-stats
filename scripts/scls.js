@@ -1,52 +1,28 @@
 import { EVENT_TYPES, HOOKS, MODULE_ID, SETTINGS } from "./constants.js";
-import { CombatLogApp } from "./apps/combat-log-app.js?v=20260519i";
-import { CombatLogService } from "./services/combat-log-service.js?v=20260519i";
+import { CombatLogApp } from "./apps/combat-log-app.js";
+import { CombatLogService } from "./services/combat-log-service.js";
 import { getSetting, registerSettings } from "./settings.js";
-import { isGM, loadModuleTranslations, localize, registerTemplateHelpers } from "./utils.js";
+import { isGM, isTrackingGM, loadModuleTranslations, localize, registerTemplateHelpers } from "./utils.js";
 
 let combatLogService = null;
 let combatLogApp = null;
-let lastSceneControlOpenAt = 0;
-const CONTROL_NAME = "combatLogStats";
-const TOOL_NAME = "open-combat-log-stats";
+const TOOL_NAME = "sclsCombatLog";
 
 export function openCombatLog(logId = null) {
   if (!isGM()) {
     ui.notifications.warn(localize("SCLS.Notification.GMOnly"));
     return null;
   }
+  if (!combatLogService) return null;
+  // One window: reopening shows the requested log in the existing window.
+  if (combatLogApp?.rendered) {
+    combatLogApp.showLog(logId);
+    combatLogApp.bringToFront?.();
+    return combatLogApp;
+  }
   combatLogApp = new CombatLogApp(combatLogService, logId);
   void combatLogApp.render({ force: true });
   return combatLogApp;
-}
-
-function installSceneControlFallback() {
-  Hooks.on("renderSceneControls", () => {
-    if (!isGM()) return;
-    setTimeout(() => {
-      const buttons = document.querySelectorAll(`[data-control='${CONTROL_NAME}'], [data-tool='${TOOL_NAME}']`);
-      for (const button of buttons) {
-        if (button.dataset.sclsBound) continue;
-        button.dataset.sclsBound = "true";
-        const handler = (event) => openCombatLogFromSceneControl(event, true);
-        button.addEventListener("pointerdown", handler, { capture: true });
-        button.addEventListener("mousedown", handler, { capture: true });
-        button.addEventListener("click", handler, { capture: true });
-      }
-    }, 0);
-  });
-}
-
-function openCombatLogFromSceneControl(event, dedupe = false) {
-  if (event) {
-    event.preventDefault?.();
-    event.stopPropagation?.();
-    event.stopImmediatePropagation?.();
-  }
-  const now = Date.now();
-  if (dedupe && now - lastSceneControlOpenAt < 500) return;
-  lastSceneControlOpenAt = now;
-  openCombatLog();
 }
 
 function injectCombatTrackerButton(_app, html) {
@@ -57,99 +33,66 @@ function injectCombatTrackerButton(_app, html) {
   button.type = "button";
   button.className = "scls-combat-tracker-button";
   button.title = localize("SCLS.SceneTool.Open");
-  button.innerHTML = `<i class="fa-solid fa-chart-line"></i> ${localize("SCLS.SceneTool.Open")}`;
+  button.innerHTML = `<i class="fa-solid fa-chart-line" inert></i> ${localize("SCLS.SceneTool.Open")}`;
   button.addEventListener("click", () => openCombatLog());
-  const target = root.querySelector(".directory-footer, footer, .combat-tracker-header") ?? root;
+  const target = root.querySelector(".combat-tracker-footer, .directory-footer, footer, .combat-tracker-header") ?? root;
   target.appendChild(button);
+}
+
+// Hook handlers run before the service exists (init) and on every client; only the tracking GM records.
+function track(handler) {
+  return (...args) => {
+    if (!combatLogService || !isTrackingGM()) return;
+    void handler(...args);
+  };
 }
 
 function registerHooks() {
   Hooks.on(HOOKS.LANGUAGE_CHANGED, applyLanguageChange);
 
-  Hooks.on("createCombat", (combat) => {
-    if (!isGM()) return;
-    void combatLogService.startCombat(combat);
-  });
+  Hooks.on("createCombat", track((combat) => combatLogService.startCombat(combat)));
+  Hooks.on("combatStart", track((combat) => combatLogService.startCombat(combat)));
+  Hooks.on("updateCombat", track((combat, changed) => combatLogService.updateCombat(combat, changed)));
+  // Ending a combat deletes the Combat document; core has no separate "combat ended" hook.
+  Hooks.on("deleteCombat", track(async (combat) => {
+    const log = await combatLogService.deleteCombat(combat);
+    if (log && getSetting(SETTINGS.SHOW_SUMMARY_ON_COMBAT_END, true)) openCombatLog(log.id);
+  }));
 
-  Hooks.on("updateCombat", (combat, changed) => {
-    if (!isGM()) return;
-    void combatLogService.updateCombat(combat, changed);
-  });
-
-  Hooks.on("deleteCombat", (combat) => {
-    if (!isGM()) return;
-    void combatLogService.deleteCombat(combat);
-  });
-
-  Hooks.on("combatStart", (combat) => {
-    if (!isGM()) return;
-    void combatLogService.startCombat(combat);
-  });
-
-  Hooks.on("combatEnd", (combat) => {
-    if (!isGM()) return;
-    void combatLogService.endCombat(combat).then((log) => {
-      if (log && getSetting(SETTINGS.SHOW_SUMMARY_ON_COMBAT_END, true)) openCombatLog(log.id);
-    });
-  });
-
-  Hooks.on("createCombatant", (combatant) => {
-    if (!isGM()) return;
-    void combatLogService.combatantCreated(combatant);
-  });
-
-  Hooks.on("updateCombatant", (combatant, changed) => {
-    if (!isGM()) return;
-    void combatLogService.combatantUpdated(combatant, changed);
-  });
-
-  Hooks.on("deleteCombatant", (combatant) => {
-    if (!isGM()) return;
-    void combatLogService.combatantRemoved(combatant);
-  });
-
-  Hooks.on("createChatMessage", (message) => {
-    if (!isGM()) return;
-    void combatLogService.chatMessageCreated(message);
-  });
+  Hooks.on("createCombatant", track((combatant) => combatLogService.combatantCreated(combatant)));
+  Hooks.on("updateCombatant", track((combatant, changed) => combatLogService.combatantUpdated(combatant, changed)));
+  Hooks.on("deleteCombatant", track((combatant) => combatLogService.combatantRemoved(combatant)));
+  Hooks.on("createChatMessage", track((message) => combatLogService.chatMessageCreated(message)));
 
   Hooks.on("preUpdateActor", (actor) => {
-    if (!isGM() || !combatLogService) return;
-    if (actor?.uuid) combatLogService.actorSnapshots.set(actor.uuid, foundry.utils.deepClone(actor.toObject?.() ?? actor));
+    if (!combatLogService || !isTrackingGM() || !actor?.uuid) return;
+    if (!combatLogService.findLogsForActor(actor).length) return;
+    combatLogService.actorSnapshots.set(actor.uuid, foundry.utils.deepClone(actor.toObject?.() ?? actor));
   });
+  Hooks.on("updateActor", track((actor, changed, options, userId) => combatLogService.actorUpdated(actor, changed, options, userId)));
 
-  Hooks.on("updateActor", (actor, changed, options, userId) => {
-    if (!isGM()) return;
-    void combatLogService.actorUpdated(actor, changed, options, userId);
-  });
-
-  Hooks.on("createActiveEffect", (effect) => trackActiveEffect(EVENT_TYPES.ACTIVE_EFFECT_CREATED, effect, {}));
-  Hooks.on("updateActiveEffect", (effect, changed) => trackActiveEffect(EVENT_TYPES.ACTIVE_EFFECT_UPDATED, effect, changed));
-  Hooks.on("deleteActiveEffect", (effect) => trackActiveEffect(EVENT_TYPES.ACTIVE_EFFECT_DELETED, effect, {}));
-
-  Hooks.on("createMeasuredTemplate", (template) => trackTemplate(EVENT_TYPES.TEMPLATE_CREATED, template));
-  Hooks.on("deleteMeasuredTemplate", (template) => trackTemplate(EVENT_TYPES.TEMPLATE_DELETED, template));
-  Hooks.on("updateToken", (token, changed) => trackToken(EVENT_TYPES.TOKEN_UPDATED, token, changed));
-  Hooks.on("createToken", (token) => trackToken(EVENT_TYPES.TOKEN_CREATED, token, {}));
-  Hooks.on("deleteToken", (token) => trackToken(EVENT_TYPES.TOKEN_DELETED, token, {}));
+  Hooks.on("createActiveEffect", track((effect) => combatLogService.activeEffectChanged(EVENT_TYPES.ACTIVE_EFFECT_CREATED, effect, {})));
+  Hooks.on("updateActiveEffect", track((effect, changed) => combatLogService.activeEffectChanged(EVENT_TYPES.ACTIVE_EFFECT_UPDATED, effect, changed)));
+  Hooks.on("deleteActiveEffect", track((effect) => combatLogService.activeEffectChanged(EVENT_TYPES.ACTIVE_EFFECT_DELETED, effect, {})));
 
   Hooks.on("getSceneControlButtons", (controls) => {
     if (!isGM()) return;
-    const control = {
-      name: CONTROL_NAME,
+    const tool = {
+      name: TOOL_NAME,
       title: localize("SCLS.SceneTool.Open"),
-      icon: "fas fa-chart-line",
-      layer: "controls",
-      tools: [{
-        name: TOOL_NAME,
-        title: localize("SCLS.SceneTool.Open"),
-        icon: "fas fa-chart-line",
-        button: true,
-        onClick: openCombatLogFromSceneControl
-      }]
+      icon: "fa-solid fa-chart-line",
+      button: true,
+      visible: true,
+      onChange: () => openCombatLog()
     };
-    if (Array.isArray(controls)) controls.push(control);
-    else controls[CONTROL_NAME] = control;
+    // v13 and v14 pass a record of controls; the token controls are always there.
+    const tokens = controls?.tokens ?? (Array.isArray(controls) ? controls.find((control) => control.name === "token" || control.name === "tokens") : null);
+    if (!tokens) return;
+    if (Array.isArray(tokens.tools)) tokens.tools.push({ ...tool, onClick: tool.onChange });
+    else {
+      tool.order = Object.keys(tokens.tools ?? {}).length;
+      tokens.tools[TOOL_NAME] = tool;
+    }
   });
 
   Hooks.on("renderCombatTracker", injectCombatTrackerButton);
@@ -159,78 +102,43 @@ function applyLanguageChange() {
   combatLogApp?.render?.({ force: true });
   for (const button of document.querySelectorAll(".scls-combat-tracker-button")) {
     button.title = localize("SCLS.SceneTool.Open");
-    button.innerHTML = `<i class="fa-solid fa-chart-line"></i> ${localize("SCLS.SceneTool.Open")}`;
+    button.innerHTML = `<i class="fa-solid fa-chart-line" inert></i> ${localize("SCLS.SceneTool.Open")}`;
   }
   ui.controls?.render?.();
-}
-
-function trackActiveEffect(type, effect, changed = {}) {
-  if (!isGM()) return;
-  void combatLogService.activeEffectChanged(type, effect, changed);
-}
-
-function trackTemplate(type, template) {
-  if (!isGM() || !getSetting(SETTINGS.TRACK_TEMPLATES, true)) return;
-  const log = combatLogService.activeLogs.get(game?.combat?.id);
-  if (!log) return;
-  log.events.push({
-    id: foundry.utils.randomID(),
-    type,
-    createdAt: new Date().toISOString(),
-    sequence: (log.events?.length ?? 0) + 1,
-    round: game.combat?.round ?? null,
-    turn: game.combat?.turn ?? null,
-    combatantId: "",
-    actorUuid: "",
-    tokenUuid: "",
-    sceneUuid: canvas?.scene?.uuid ?? log.sceneUuid,
-    userId: game.user?.id ?? "",
-    visibility: "gm",
-    source: { kind: "templateUpdate", id: template.id },
-    confidence: "probable",
-    ignored: false,
-    tags: [],
-    data: { templateId: template.id }
-  });
-  void combatLogService.saveAndCompute(log);
-}
-
-function trackToken(type, token, changed) {
-  if (!isGM() || !getSetting(SETTINGS.TRACK_TOKEN_UPDATES, true)) return;
-  const log = combatLogService.activeLogs.get(game?.combat?.id);
-  if (!log) return;
-  log.events.push({
-    id: foundry.utils.randomID(),
-    type,
-    createdAt: new Date().toISOString(),
-    sequence: (log.events?.length ?? 0) + 1,
-    round: game.combat?.round ?? null,
-    turn: game.combat?.turn ?? null,
-    combatantId: "",
-    actorUuid: token.actor?.uuid ?? "",
-    tokenUuid: token.uuid ?? "",
-    sceneUuid: canvas?.scene?.uuid ?? log.sceneUuid,
-    userId: game.user?.id ?? "",
-    visibility: "gm",
-    source: { kind: "tokenUpdate", id: token.id },
-    confidence: "probable",
-    ignored: false,
-    tags: [],
-    data: { changed }
-  });
-  void combatLogService.saveAndCompute(log);
 }
 
 Hooks.once("init", () => {
   registerSettings();
   registerTemplateHelpers();
-  installSceneControlFallback();
   registerHooks();
 });
+
+// When GMs join or leave, the recording GM can change. The new one picks up the running logs,
+// the previous one writes its pending changes and lets go.
+let recording = false;
+async function syncRecordingGM() {
+  if (!combatLogService) return;
+  const now = isTrackingGM();
+  if (now === recording) return;
+  recording = now;
+  if (now) await combatLogService.ready();
+  else await combatLogService.releaseLogs();
+}
 
 Hooks.once("ready", async () => {
   await loadModuleTranslations();
   combatLogService = new CombatLogService();
+  recording = isTrackingGM();
   await combatLogService.ready();
+  Hooks.on("userConnected", () => void syncRecordingGM());
+  // The index setting changes whenever a GM saves logs. Changes from another client make the local copy stale.
+  const indexKey = `${MODULE_ID}.${SETTINGS.INDEX}`;
+  const onIndexChanged = (setting, userId) => {
+    if (setting?.key === indexKey && userId !== game.user.id) combatLogService?.persistence?.invalidate();
+  };
+  Hooks.on("createSetting", (setting, _options, userId) => onIndexChanged(setting, userId));
+  Hooks.on("updateSetting", (setting, _changes, _options, userId) => onIndexChanged(setting, userId));
+  // Writes are batched; a reload or closing the tab should not lose the last burst.
+  globalThis.addEventListener?.("beforeunload", () => void combatLogService?.flushPendingSaves());
   game.modules.get(MODULE_ID).api = { openCombatLog, service: combatLogService };
 });

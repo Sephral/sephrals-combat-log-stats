@@ -32,6 +32,13 @@ export class CombatLogPersistenceService {
     return `${this.storageBasePath()}/${STORE_FILE_NAME}`;
   }
 
+  // Another GM wrote the logs. Read them again instead of trusting this client's copy.
+  invalidate() {
+    this.storeCache = null;
+    this.cache.clear();
+    this.missingFilePaths.clear();
+  }
+
   async loadStoredIndex() {
     const index = getSetting(SETTINGS.INDEX, { schemaVersion: SCHEMA_VERSION, logs: [] });
     return { schemaVersion: SCHEMA_VERSION, logs: Array.isArray(index?.logs) ? index.logs : [] };
@@ -196,7 +203,7 @@ export class CombatLogPersistenceService {
     try {
       const response = isAbsoluteUrl(filePath)
         ? await fetch(filePath, { cache: "no-store" })
-        : await fetch(filePath.startsWith("/") ? filePath : `/${filePath}`);
+        : await fetch(filePath.startsWith("/") ? filePath : `/${filePath}`, { cache: "no-store" });
       if (!response.ok) {
         if ([403, 404].includes(response.status)) this.missingFilePaths.add(filePath);
         return null;

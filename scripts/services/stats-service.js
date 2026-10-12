@@ -1,4 +1,8 @@
 import { CONFIDENCE, DPR_METHODS, EVENT_TYPES, RESOURCE_INTERPRETATIONS, SIDES } from "../constants.js";
+import {
+  ACTION_KINDS, actionKind, eventAmount, isControl, isCritical, isDamageDealt, isDowned, isFumble, isHealingGiven,
+  isResourceDelta, isStatEvent, sourceCombatantId, targetCombatantId
+} from "./event-insights.js";
 
 function emptyBucket(id = "") {
   return {
@@ -18,6 +22,13 @@ function emptyBucket(id = "") {
     healingCorrectionsUp: 0,
     healingCorrectionsDown: 0,
     healingNet: 0,
+    healingReceived: 0,
+    martial: 0,
+    ranged: 0,
+    magic: 0,
+    control: 0,
+    downed: 0,
+    takedowns: 0,
     crits: 0,
     fumbles: 0,
     unclearEvents: 0,
@@ -27,33 +38,25 @@ function emptyBucket(id = "") {
   };
 }
 
-function addDamage(bucket, amount, { target = false } = {}) {
-  if (target) {
-    bucket.damageTakenGross += amount;
-    bucket.damageTakenNet += amount;
-    return;
-  }
-  bucket.damageAppliedGross += amount;
-  bucket.damageAppliedNet += amount;
-}
+const SUM_KEYS = ["damageRolled", "damageAppliedGross", "damageCorrectionsUp", "damageCorrectionsDown", "damageAppliedNet", "damageTakenGross", "damageTakenNet", "healingRolled", "healingAppliedGross", "healingCorrectionsUp", "healingCorrectionsDown", "healingNet", "healingReceived", "martial", "ranged", "magic", "control", "downed", "takedowns", "crits", "fumbles", "unclearEvents", "manualEvents", "ignoredEvents"];
 
 function round(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
 
-function eventAmount(event) {
-  return Math.abs(Number(event?.data?.amount ?? event?.data?.delta ?? event?.data?.total ?? 0)) || 0;
-}
-
 export class CombatStatsService {
   static compute(log, options = {}) {
     const includeUnclear = Boolean(options.includeUnclearDeltasInStats);
-    const method = options.defaultDprMethod ?? DPR_METHODS.APPLIED_NET;
+    const method = Object.values(DPR_METHODS).includes(options.defaultDprMethod) ? options.defaultDprMethod : DPR_METHODS.APPLIED_NET;
     const eventRounds = (log.events ?? []).map((event) => Number(event.round) || 0);
     const roundCount = Math.max(1, Number(log?.rounds ?? 0) || 0, ...eventRounds);
     const byCombatant = new Map((log.participants ?? []).map((participant) => [participant.combatantId, { ...emptyBucket(participant.combatantId), name: participant.name, side: participant.side ?? SIDES.UNKNOWN, roundsActive: roundCount }]));
     const bySide = new Map(Object.values(SIDES).map((side) => [side, { ...emptyBucket(side), name: side, side, roundsActive: roundCount }]));
-    const warnings = [];
+    const bucketFor = (id) => {
+      if (!id) return null;
+      if (!byCombatant.has(id)) byCombatant.set(id, { ...emptyBucket(id), roundsActive: roundCount });
+      return byCombatant.get(id);
+    };
 
     const summary = {
       rounds: roundCount,
@@ -72,207 +75,242 @@ export class CombatStatsService {
       unclassifiedDeltas: 0,
       criticalHits: 0,
       criticalFumbles: 0,
+      partyDowned: 0,
+      enemiesDefeated: 0,
       activeDurationMs: activeDuration(log),
       sessionCount: log.sessionSegments?.length ?? 0
     };
+    let manualStatEvents = 0;
 
     for (const event of log.events ?? []) {
-      const participant = findParticipant(log, event);
-      const bucketId = participant?.combatantId ?? event.combatantId ?? "";
-      const bucket = byCombatant.get(bucketId) ?? emptyBucket(bucketId);
-      const targetBucket = targetBucketForEvent(log, byCombatant, event, bucketId);
-      let shouldStoreBucket = Boolean(bucketId);
-      if (participant) {
-        bucket.name ||= participant.name;
-        bucket.side = participant.side ?? bucket.side;
-      }
+      const source = bucketFor(sourceCombatantId(event));
+      const target = bucketFor(targetCombatantId(event));
+      const own = bucketFor(event.combatantId);
       if (event.ignored) {
-        if (shouldStoreBucket) bucket.ignoredEvents += 1;
+        if (own) own.ignoredEvents += 1;
         continue;
       }
       if (event.confidence === CONFIDENCE.UNCLEAR && !includeUnclear) {
-        if (event.type === EVENT_TYPES.RESOURCE_DELTA || event.type === EVENT_TYPES.RESOURCE_DELTA_OFFLINE || event.type.startsWith("damage.")) summary.unclassifiedDeltas += 1;
-        if (shouldStoreBucket) bucket.unclearEvents += 1;
+        if (isResourceDelta(event) || String(event.type).startsWith("damage.") || String(event.type).startsWith("healing.")) {
+          summary.unclassifiedDeltas += 1;
+          if (target ?? own) (target ?? own).unclearEvents += 1;
+        }
         continue;
       }
-      if (event.confidence === CONFIDENCE.MANUAL && shouldStoreBucket) bucket.manualEvents += 1;
+      if (event.confidence === CONFIDENCE.MANUAL && isStatEvent(event)) {
+        manualStatEvents += 1;
+        if (own) own.manualEvents += 1;
+      }
 
       const amount = eventAmount(event);
       switch (event.type) {
+        case EVENT_TYPES.ROLL_ATTACK:
+          if (isCritical(event)) {
+            summary.criticalHits += 1;
+            if (source) source.crits += 1;
+          }
+          if (isFumble(event)) {
+            summary.criticalFumbles += 1;
+            if (source) source.fumbles += 1;
+          }
+          break;
         case EVENT_TYPES.ROLL_DAMAGE:
           summary.grossDamageRolled += amount;
-          bucket.damageRolled += amount;
+          if (source) source.damageRolled += amount;
           break;
         case EVENT_TYPES.ROLL_HEALING:
           summary.grossHealingRolled += amount;
-          bucket.healingRolled += amount;
+          if (source) source.healingRolled += amount;
           break;
         case EVENT_TYPES.DAMAGE_APPLIED:
         case EVENT_TYPES.DAMAGE_MANUAL_ADDED:
           summary.grossDamageApplied += amount;
           summary.netDamageApplied += amount;
-          addDamage(bucket, amount);
-          if (targetBucket && targetBucket.id !== bucket.id) addDamage(targetBucket, amount, { target: true });
+          addDamage(source, target, amount);
           break;
         case EVENT_TYPES.DAMAGE_CORRECTED_UP:
           summary.damageCorrectionsUp += amount;
           summary.netDamageApplied += amount;
-          bucket.damageCorrectionsUp += amount;
-          bucket.damageAppliedNet += amount;
+          if (source) {
+            source.damageCorrectionsUp += amount;
+            source.damageAppliedNet += amount;
+          }
           break;
         case EVENT_TYPES.DAMAGE_CORRECTED_DOWN:
         case EVENT_TYPES.DAMAGE_MANUAL_REDUCED:
           summary.damageCorrectionsDown += amount;
           summary.netDamageApplied -= amount;
-          bucket.damageCorrectionsDown += amount;
-          bucket.damageAppliedNet -= amount;
+          if (source) {
+            source.damageCorrectionsDown += amount;
+            source.damageAppliedNet -= amount;
+          }
+          if (target) target.damageTakenNet -= amount;
           break;
         case EVENT_TYPES.HEALING_APPLIED:
         case EVENT_TYPES.HEALING_MANUAL_ADDED:
           summary.grossHealingApplied += amount;
           summary.netHealingApplied += amount;
-          bucket.healingAppliedGross += amount;
-          bucket.healingNet += amount;
+          addHealing(source, target, amount);
           break;
         case EVENT_TYPES.HEALING_CORRECTED_UP:
           summary.healingCorrectionsUp += amount;
           summary.netHealingApplied += amount;
-          bucket.healingCorrectionsUp += amount;
-          bucket.healingNet += amount;
+          if (source) {
+            source.healingCorrectionsUp += amount;
+            source.healingNet += amount;
+          }
           break;
         case EVENT_TYPES.HEALING_CORRECTED_DOWN:
         case EVENT_TYPES.HEALING_MANUAL_REDUCED:
           summary.healingCorrectionsDown += amount;
           summary.netHealingApplied -= amount;
-          bucket.healingCorrectionsDown += amount;
-          bucket.healingNet -= amount;
+          if (source) {
+            source.healingCorrectionsDown += amount;
+            source.healingNet -= amount;
+          }
+          if (target) target.healingReceived -= amount;
           break;
         case EVENT_TYPES.RESOURCE_DELTA:
         case EVENT_TYPES.RESOURCE_DELTA_OFFLINE:
-          applyResourceDelta(event, summary, bucket, targetBucket);
-          if (targetBucket && targetBucket.id !== bucket.id && event.data?.interpretedAs === RESOURCE_INTERPRETATIONS.DAMAGE) addDamage(targetBucket, amount, { target: true });
+          applyResourceDelta(event, summary, source, target, amount);
           break;
         default:
           break;
       }
-      if (shouldStoreBucket) byCombatant.set(bucket.id, bucket);
-      if (targetBucket?.id) byCombatant.set(targetBucket.id, targetBucket);
+
+      if (isDamageDealt(event) && source) {
+        const kind = actionKind(event);
+        if (kind === ACTION_KINDS.MELEE) source.martial += 1;
+        if (kind === ACTION_KINDS.RANGED) source.ranged += 1;
+        if (kind === ACTION_KINDS.SPELL) source.magic += 1;
+      }
+      if (isControl(event) && source) source.control += 1;
+      if (isDowned(event) && target) {
+        target.downed += 1;
+        if (target.side === SIDES.FRIENDLY) summary.partyDowned += 1;
+        if (target.side === SIDES.HOSTILE) summary.enemiesDefeated += 1;
+        if (source && source.id !== target.id) source.takedowns += 1;
+      }
     }
 
     for (const bucket of byCombatant.values()) {
-      bucket.netDPR = round(bucket.damageAppliedNet / (bucket.roundsActive || roundCount || 1));
-      const sideBucket = bySide.get(bucket.side) ?? bySide.get(SIDES.UNKNOWN);
-      mergeBucket(sideBucket, bucket);
+      bucket.netDPR = round(dprValue(bucket, method) / (bucket.roundsActive || roundCount || 1));
+      mergeBucket(bySide.get(bucket.side) ?? bySide.get(SIDES.UNKNOWN), bucket);
     }
+    for (const bucket of bySide.values()) bucket.netDPR = round(dprValue(bucket, method) / roundCount);
 
-    for (const bucket of bySide.values()) bucket.netDPR = round(bucket.damageAppliedNet / roundCount);
-    if (summary.unclassifiedDeltas) warnings.push(`${summary.unclassifiedDeltas} unclear resource changes are excluded from default DPR.`);
-    if ((log.events ?? []).some((event) => event.confidence === CONFIDENCE.MANUAL)) warnings.push("Manually classified events are included in net statistics.");
+    // Counts only; the window words them in the language the GM uses when looking at them.
+    const warningCounts = {};
+    if (summary.unclassifiedDeltas) warningCounts.unclearExcluded = summary.unclassifiedDeltas;
+    if (manualStatEvents) warningCounts.manualIncluded = manualStatEvents;
+    const warningCodes = Object.keys(warningCounts);
 
+    const combatantRows = Array.from(byCombatant.values()).filter((bucket) => bucket.name || (log.participants ?? []).some((participant) => participant.combatantId === bucket.id));
     return {
       summary,
-      byCombatant: Array.from(byCombatant.values()),
-      byActor: [],
+      byCombatant: combatantRows,
       bySide: Array.from(bySide.values()),
       dpr: {
         roundCount,
         method,
-        partyDPR: round((bySide.get(SIDES.FRIENDLY)?.damageAppliedNet ?? 0) / roundCount),
-        enemyDPR: round((bySide.get(SIDES.HOSTILE)?.damageAppliedNet ?? 0) / roundCount),
-        neutralDPR: round((bySide.get(SIDES.NEUTRAL)?.damageAppliedNet ?? 0) / roundCount),
-        unknownDPR: round((bySide.get(SIDES.UNKNOWN)?.damageAppliedNet ?? 0) / roundCount),
-        byCombatant: Array.from(byCombatant.values()),
-        byActor: [],
-        bySide: Array.from(bySide.values()),
-        warnings
+        partyDPR: bySide.get(SIDES.FRIENDLY)?.netDPR ?? 0,
+        enemyDPR: bySide.get(SIDES.HOSTILE)?.netDPR ?? 0,
+        neutralDPR: bySide.get(SIDES.NEUTRAL)?.netDPR ?? 0,
+        unknownDPR: bySide.get(SIDES.UNKNOWN)?.netDPR ?? 0,
+        byCombatant: combatantRows,
+        bySide: Array.from(bySide.values())
       },
-      warnings,
+      warningCounts,
+      warningCodes,
       confidenceSummary: confidenceSummary(log.events ?? [])
     };
   }
 }
 
-function findParticipant(log, event) {
-  return (log.participants ?? []).find((entry) => {
-    if (entry.combatantId && event.combatantId && entry.combatantId === event.combatantId) return true;
-    if (entry.actorUuid && event.actorUuid && entry.actorUuid === event.actorUuid) return true;
-    return false;
-  });
-}
-
-function targetBucketForEvent(log, byCombatant, event, sourceBucketId) {
-  const targetParticipant = (log.participants ?? []).find((entry) => {
-    if (entry.combatantId && event.data?.targetCombatantId && entry.combatantId === event.data.targetCombatantId) return true;
-    if (entry.actorUuid && event.data?.targetActorUuid && entry.actorUuid === event.data.targetActorUuid) return true;
-    if (entry.tokenUuid && event.data?.targetTokenUuid && entry.tokenUuid === event.data.targetTokenUuid) return true;
-    return false;
-  });
-  const targetId = targetParticipant?.combatantId ?? event.data?.targetCombatantId ?? "";
-  if (!targetId || targetId === sourceBucketId) return null;
-  const bucket = byCombatant.get(targetId) ?? emptyBucket(targetId);
-  if (targetParticipant) {
-    bucket.name ||= targetParticipant.name;
-    bucket.side = targetParticipant.side ?? bucket.side;
+function addDamage(source, target, amount) {
+  if (source) {
+    source.damageAppliedGross += amount;
+    source.damageAppliedNet += amount;
   }
-  return bucket;
+  if (target && target !== source) {
+    target.damageTakenGross += amount;
+    target.damageTakenNet += amount;
+  }
 }
 
-function applyResourceDelta(event, summary, bucket, targetBucket = null) {
-  const amount = eventAmount(event);
+function addHealing(source, target, amount) {
+  if (source) {
+    source.healingAppliedGross += amount;
+    source.healingNet += amount;
+  }
+  if (target) target.healingReceived += amount;
+}
+
+function applyResourceDelta(event, summary, source, target, amount) {
   switch (event.data?.interpretedAs) {
     case RESOURCE_INTERPRETATIONS.DAMAGE:
       summary.grossDamageApplied += amount;
       summary.netDamageApplied += amount;
-      if (isSourceAttributedResourceDelta(event)) addDamage(bucket, amount);
-      else addDamage(targetBucket ?? bucket, amount, { target: true });
+      addDamage(isDamageDealt(event) ? source : null, target, amount);
       break;
     case RESOURCE_INTERPRETATIONS.HEALING:
       summary.grossHealingApplied += amount;
       summary.netHealingApplied += amount;
-      bucket.healingAppliedGross += amount;
-      bucket.healingNet += amount;
+      // Healing without a known healer only counts as received.
+      addHealing(isHealingGiven(event) ? source : null, target, amount);
       break;
     case RESOURCE_INTERPRETATIONS.CORRECTION_DAMAGE_UP:
       summary.damageCorrectionsUp += amount;
       summary.netDamageApplied += amount;
-      bucket.damageCorrectionsUp += amount;
-      bucket.damageAppliedNet += amount;
+      if (source) {
+        source.damageCorrectionsUp += amount;
+        source.damageAppliedNet += amount;
+      }
       break;
     case RESOURCE_INTERPRETATIONS.CORRECTION_DAMAGE_DOWN:
       summary.damageCorrectionsDown += amount;
       summary.netDamageApplied -= amount;
-      bucket.damageCorrectionsDown += amount;
-      bucket.damageAppliedNet -= amount;
+      if (source) {
+        source.damageCorrectionsDown += amount;
+        source.damageAppliedNet -= amount;
+      }
       break;
     case RESOURCE_INTERPRETATIONS.CORRECTION_HEALING_UP:
       summary.healingCorrectionsUp += amount;
       summary.netHealingApplied += amount;
-      bucket.healingCorrectionsUp += amount;
-      bucket.healingNet += amount;
+      if (source) {
+        source.healingCorrectionsUp += amount;
+        source.healingNet += amount;
+      }
       break;
     case RESOURCE_INTERPRETATIONS.CORRECTION_HEALING_DOWN:
       summary.healingCorrectionsDown += amount;
       summary.netHealingApplied -= amount;
-      bucket.healingCorrectionsDown += amount;
-      bucket.healingNet -= amount;
+      if (source) {
+        source.healingCorrectionsDown += amount;
+        source.healingNet -= amount;
+      }
       break;
     case RESOURCE_INTERPRETATIONS.IGNORED:
+    case RESOURCE_INTERPRETATIONS.TEMP_HP_GAIN:
+    case RESOURCE_INTERPRETATIONS.TEMP_HP_LOSS:
+    case RESOURCE_INTERPRETATIONS.MAX_HP_CHANGE:
       break;
     default:
       summary.unclassifiedDeltas += 1;
-      bucket.unclearEvents += 1;
+      if (target) target.unclearEvents += 1;
       break;
   }
 }
 
-function isSourceAttributedResourceDelta(event) {
-  return event.data?.attribution === "correlatedChatRoll" || Boolean(event.data?.sourceCombatantId || event.data?.sourceActorUuid || event.data?.sourceTokenUuid);
+function dprValue(bucket, method) {
+  if (method === DPR_METHODS.ROLLED) return bucket.damageRolled;
+  if (method === DPR_METHODS.APPLIED_GROSS) return bucket.damageAppliedGross;
+  return bucket.damageAppliedNet;
 }
 
 function mergeBucket(target, source) {
-  for (const key of ["damageRolled", "damageAppliedGross", "damageCorrectionsUp", "damageCorrectionsDown", "damageAppliedNet", "damageTakenGross", "damageTakenNet", "healingRolled", "healingAppliedGross", "healingCorrectionsUp", "healingCorrectionsDown", "healingNet", "crits", "fumbles", "unclearEvents", "manualEvents", "ignoredEvents"]) {
-    target[key] += source[key] ?? 0;
-  }
+  for (const key of SUM_KEYS) target[key] += source[key] ?? 0;
 }
 
 function confidenceSummary(events) {
@@ -292,4 +330,4 @@ function activeDuration(log) {
   }, 0);
 }
 
-export const __test__ = { applyResourceDelta, findParticipant };
+export const __test__ = { applyResourceDelta, dprValue };

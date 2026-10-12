@@ -15,20 +15,24 @@ globalThis.Hooks = {
 
 const { CombatLogApp, __test__ } = await import("../scripts/apps/combat-log-app.js");
 
-test("correction candidates only include unclear or manually classified resource deltas", () => {
+test("correction candidates include unclear, corrected and unattributed hit point changes", () => {
   const result = __test__.correctionEvents({
+    participants: [{ combatantId: "hero", name: "Hero", side: SIDES.FRIENDLY }, { combatantId: "foe", name: "Foe", side: SIDES.HOSTILE }],
     events: [
       { id: "started", type: EVENT_TYPES.COMBAT_STARTED, confidence: CONFIDENCE.UNCLEAR, data: {} },
-      { id: "resumed", type: EVENT_TYPES.COMBAT_RESUMED, confidence: CONFIDENCE.UNCLEAR, data: {} },
-      { id: "safe-delta", type: EVENT_TYPES.RESOURCE_DELTA, confidence: CONFIDENCE.SAFE, data: { interpretedAs: RESOURCE_INTERPRETATIONS.DAMAGE } },
-      { id: "unclear-delta", type: EVENT_TYPES.RESOURCE_DELTA, confidence: CONFIDENCE.UNCLEAR, data: { interpretedAs: RESOURCE_INTERPRETATIONS.UNKNOWN } },
-      { id: "manual-delta", type: EVENT_TYPES.RESOURCE_DELTA_OFFLINE, confidence: CONFIDENCE.MANUAL, data: { manualCorrection: true, interpretedAs: RESOURCE_INTERPRETATIONS.HEALING } }
+      { id: "attributed", type: EVENT_TYPES.RESOURCE_DELTA, combatantId: "hero", confidence: CONFIDENCE.SAFE, data: { interpretedAs: RESOURCE_INTERPRETATIONS.DAMAGE, attribution: "systemApplied", targetCombatantId: "foe" } },
+      { id: "no-source", type: EVENT_TYPES.RESOURCE_DELTA, combatantId: "foe", confidence: CONFIDENCE.PROBABLE, data: { interpretedAs: RESOURCE_INTERPRETATIONS.DAMAGE, targetCombatantId: "foe" } },
+      { id: "unclear-delta", type: EVENT_TYPES.RESOURCE_DELTA, combatantId: "foe", confidence: CONFIDENCE.UNCLEAR, data: { interpretedAs: RESOURCE_INTERPRETATIONS.UNKNOWN } },
+      { id: "manual-delta", type: EVENT_TYPES.RESOURCE_DELTA_OFFLINE, combatantId: "hero", confidence: CONFIDENCE.MANUAL, data: { manualCorrection: true, interpretedAs: RESOURCE_INTERPRETATIONS.HEALING } }
     ]
   });
 
-  assert.deepEqual(result.map((event) => event.id), ["unclear-delta", "manual-delta"]);
-  assert.equal(result[0].interpretationOptions.find((option) => option.value === RESOURCE_INTERPRETATIONS.UNKNOWN)?.selected, true);
-  assert.equal(result[1].interpretationOptions.find((option) => option.value === RESOURCE_INTERPRETATIONS.HEALING)?.selected, true);
+  assert.deepEqual(result.map((event) => event.id), ["no-source", "unclear-delta", "manual-delta"]);
+  assert.equal(result[0].targetName, "Foe");
+  assert.equal(result[0].sourceOptions.find((option) => option.selected)?.value, "");
+  assert.equal(result[0].sourceOptions.some((option) => option.value === "foe"), false);
+  assert.equal(result[1].interpretationOptions.find((option) => option.value === RESOURCE_INTERPRETATIONS.UNKNOWN)?.selected, true);
+  assert.equal(result[2].interpretationOptions.find((option) => option.value === RESOURCE_INTERPRETATIONS.HEALING)?.selected, true);
 });
 
 test("participant side options preserve the selected side", () => {
@@ -64,20 +68,14 @@ test("combat rounds group readable damage and healing actions by round", () => {
   assert.equal(result[0].actions[0].detail, "Fire Bolt");
 });
 
-test("dpr rows include participant images and discipline metrics", () => {
+test("dpr rows read the computed discipline metrics", () => {
   const result = __test__.dprRows({
     participants: [
       { combatantId: "hero", name: "Hero", side: SIDES.FRIENDLY, img: "hero.webp" },
       { combatantId: "foe", name: "Foe", side: SIDES.HOSTILE, img: "foe.webp" }
     ],
-    events: [
-      { id: "hit", type: EVENT_TYPES.DAMAGE_APPLIED, combatantId: "hero", data: { amount: 12, actionName: "Longsword Slash", targetCombatantId: "foe" } },
-      { id: "spell", type: EVENT_TYPES.DAMAGE_APPLIED, combatantId: "hero", data: { amount: 10, actionName: "Fireball", targetCombatantId: "foe" } },
-      { id: "heal", type: EVENT_TYPES.HEALING_APPLIED, combatantId: "hero", data: { amount: 5, actionName: "Healing Word", targetCombatantId: "hero" } },
-      { id: "control", type: EVENT_TYPES.ACTIVE_EFFECT_CREATED, combatantId: "hero", data: { name: "Slowed", targetCombatantId: "foe" } },
-      { id: "down", type: EVENT_TYPES.DAMAGE_APPLIED, combatantId: "foe", data: { amount: 9, actionName: "Arrow Shot", targetCombatantId: "hero", targetHpAfter: 0 } }
-    ],
-    computed: { dpr: { byCombatant: [{ id: "hero", name: "Hero", side: SIDES.FRIENDLY, damageAppliedNet: 12, netDPR: 6 }] } }
+    events: [],
+    computed: { dpr: { byCombatant: [{ id: "hero", name: "Hero", side: SIDES.FRIENDLY, damageAppliedNet: 12, netDPR: 6, healingNet: 5, martial: 1, magic: 1, control: 1, downed: 1, takedowns: 2 }] } }
   });
 
   assert.equal(result[0].img, "hero.webp");
@@ -88,6 +86,8 @@ test("dpr rows include participant images and discipline metrics", () => {
   assert.equal(result[0].magic, 1);
   assert.equal(result[0].control, 1);
   assert.equal(result[0].downed, 1);
+  assert.equal(result[0].takedowns, 2);
+  assert.equal(result[0].sideLabel, "SCLS.Side.friendly");
 });
 
 test("impact meter rows sort by numeric and text columns", () => {
@@ -121,16 +121,16 @@ test("combat metrics summarize contributions, disciplines, and top actions", () 
       { combatantId: "foe", name: "Foe", side: SIDES.HOSTILE, img: "foe.webp" }
     ],
     events: [
-      { id: "hit", type: EVENT_TYPES.DAMAGE_APPLIED, combatantId: "hero", data: { amount: 12, actionName: "Longsword Slash", targetCombatantId: "foe" } },
-      { id: "spell", type: EVENT_TYPES.DAMAGE_APPLIED, combatantId: "hero", data: { amount: 10, actionName: "Fireball", targetCombatantId: "foe" } },
+      { id: "hit", type: EVENT_TYPES.DAMAGE_APPLIED, combatantId: "hero", data: { amount: 12, actionName: "Longsword Slash", actionKind: "melee", targetCombatantId: "foe" } },
+      { id: "spell", type: EVENT_TYPES.DAMAGE_APPLIED, combatantId: "hero", data: { amount: 10, actionName: "Fireball", actionKind: "spell", targetCombatantId: "foe" } },
       { id: "heal", type: EVENT_TYPES.HEALING_APPLIED, combatantId: "hero", data: { amount: 5, actionName: "Healing Word", targetCombatantId: "hero" } },
-      { id: "control", type: EVENT_TYPES.ACTIVE_EFFECT_CREATED, combatantId: "hero", data: { name: "Slowed", targetCombatantId: "foe" } },
-      { id: "down", type: EVENT_TYPES.DAMAGE_APPLIED, combatantId: "foe", data: { amount: 9, actionName: "Arrow Shot", targetCombatantId: "hero", targetHpAfter: 0 } }
+      { id: "control", type: EVENT_TYPES.ACTIVE_EFFECT_CREATED, combatantId: "hero", data: { name: "Slowed", control: true, sourceCombatantId: "hero", targetCombatantId: "foe" } }
     ],
     computed: {
+      summary: { netDamageApplied: 31, netHealingApplied: 5, partyDowned: 1, enemiesDefeated: 0 },
       dpr: {
         byCombatant: [
-          { id: "hero", name: "Hero", side: SIDES.FRIENDLY, damageAppliedNet: 22, damageTakenNet: 9, netDPR: 11 },
+          { id: "hero", name: "Hero", side: SIDES.FRIENDLY, damageAppliedNet: 22, damageTakenNet: 9, healingNet: 5, martial: 1, magic: 1, control: 1, downed: 1, netDPR: 11 },
           { id: "foe", name: "Foe", side: SIDES.HOSTILE, damageAppliedNet: 9, damageTakenNet: 22, netDPR: 4.5 }
         ],
         bySide: [
@@ -144,13 +144,16 @@ test("combat metrics summarize contributions, disciplines, and top actions", () 
   assert.equal(result.contributionRows[0].name, "Hero");
   assert.equal(result.contributionRows[0].damagePercent, 100);
   assert.deepEqual(result.contributionRows[0].impactMetrics.map((metric) => metric.type), ["damage", "taken", "healing", "control", "downed"]);
+  assert.equal(result.totals.damage, 31);
   assert.equal(result.totals.healing, 5);
   assert.equal(result.totals.control, 1);
-  assert.equal(result.totals.downed, 1);
+  assert.equal(result.totals.partyDowned, 1);
   assert.equal(result.disciplineRows.find((row) => row.id === "magic")?.value, 1);
   assert.equal(result.disciplineRows.find((row) => row.id === "damage")?.percent, 100);
   assert.ok((result.disciplineRows.find((row) => row.id === "healing")?.percent ?? 0) < 100);
   assert.equal(result.topActions[0].name, "Longsword Slash");
+  assert.equal(result.topActions[0].kindLabel, "SCLS.ActionKind.damage");
+  assert.equal(result.topActions.some((row) => row.name === "Slowed" && row.kind === "control"), true);
   assert.equal(result.pressureRows[0].pressurePercent, 100);
 });
 
@@ -173,7 +176,7 @@ test("tab navigation separates history selection from combat detail pages", () =
 
   assert.equal(result.historyTab.id, "history");
   assert.equal(result.showConnector, true);
-  assert.equal(result.connectorArrow, "-->");
+  assert.equal(result.connectorIcon, "fa-solid fa-angles-right");
   assert.equal(result.detailTabs.some((tab) => tab.id === "summary" && tab.active), true);
   assert.equal(result.detailTabs.some((tab) => tab.id === "history"), false);
   assert.equal(result.detailTabs.some((tab) => tab.id === "raw"), false);
@@ -223,7 +226,7 @@ test("open combat log windows schedule a live render for matching log updates", 
   hookCallbacks.get(HOOKS.LOG_UPDATED)({ id: "other" });
   hookCallbacks.get(HOOKS.LOG_UPDATED)({ id: "current" });
   hookCallbacks.get(HOOKS.LOG_UPDATED)({ id: "current" });
-  await new Promise((resolve) => setTimeout(resolve, 150));
+  await new Promise((resolve) => setTimeout(resolve, 350));
 
   assert.equal(renders, 1);
   await app.close();

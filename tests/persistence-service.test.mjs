@@ -481,3 +481,16 @@ test("a failed upload (FilePicker returns false) keeps the logs inline in the wo
   assert.equal(storedIndex.logs[0].filePath, null);
   assert.equal(storedIndex.logs[0].inlineLog.id, "log-x");
 });
+test("logs written by another GM are read again after invalidation", async () => {
+  const entry = (id, status) => ({ combatLogId: id, inlineLog: { id, status, title: id, startedAt: new Date().toISOString(), events: [], participants: [], computed: { summary: { rounds: 1 } } } });
+  storedIndex = { schemaVersion: 1, logs: [entry("first", LOG_STATUS.ENDED)] };
+  const service = new CombatLogPersistenceService();
+  assert.equal((await service.loadActiveLogs()).length, 0);
+
+  // another GM starts a combat and saves the index
+  storedIndex = { schemaVersion: 1, logs: [entry("running", LOG_STATUS.ACTIVE), entry("first", LOG_STATUS.ENDED)] };
+  assert.equal((await service.loadActiveLogs()).length, 0, "the cached store is still used");
+
+  service.invalidate();
+  assert.deepEqual((await service.loadActiveLogs()).map((log) => log.id), ["running"]);
+});

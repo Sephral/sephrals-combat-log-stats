@@ -1,10 +1,16 @@
-import { CONFIDENCE, EVENT_TYPES, HOOKS, MODULE_ID, RESOURCE_INTERPRETATIONS, SETTINGS, SHARE_MODES, SIDES, TABS } from "../constants.js";
+import { CONFIDENCE, EVENT_TYPES, HOOKS, LOG_STATUS, MODULE_ID, RESOURCE_INTERPRETATIONS, SETTINGS, SHARE_MODES, SIDES, SOURCE_KINDS, TABS } from "../constants.js";
 import { getSetting } from "../settings.js";
-import { escapeHtml, formatDateTime, formatDuration, localize, renderAppTemplate } from "../utils.js";
+import { escapeHtml, format, formatDateTime, formatDuration, isTrackingGM, localize, renderAppTemplate } from "../utils.js";
 import { CombatLogExportService } from "../services/export-service.js";
 import { normalizeReportSections, PlayerReportService, REPORT_SECTIONS } from "../services/player-report-service.js";
+import {
+  actionKind, actionName, eventAmount, isControl, isDamageApplied, isDamageDealt, isDowned,
+  isHealingApplied, isResourceDelta, isSourceAttributed, sourceCombatantId, targetCombatantId
+} from "../services/event-insights.js";
 
 const DEFAULT_POSITION = { width: 1120, height: 760 };
+const SHAREABLE_MODES = [SHARE_MODES.SUMMARY_ONLY, SHARE_MODES.PARTY_DPR_ONLY, SHARE_MODES.FULL_VISIBLE_DPR, SHARE_MODES.FULL_VISIBLE_RECAP, SHARE_MODES.PUBLIC_REPORT];
+const MANUAL_TYPES = [EVENT_TYPES.DAMAGE_MANUAL_ADDED, EVENT_TYPES.DAMAGE_MANUAL_REDUCED, EVENT_TYPES.HEALING_MANUAL_ADDED, EVENT_TYPES.HEALING_MANUAL_REDUCED];
 
 export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
   static DEFAULT_OPTIONS = {
@@ -13,17 +19,15 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     tag: "section",
     position: DEFAULT_POSITION,
     window: {
-      title: localize("SCLS.App.Title"),
       icon: "fa-solid fa-chart-line",
       resizable: true
     },
     actions: {
       switchTab: CombatLogApp.#onTab,
-      classify: CombatLogApp.#onClassify,
       ignoreEvent: CombatLogApp.#onIgnoreEvent,
       restoreEvent: CombatLogApp.#onRestoreEvent,
-      setSide: CombatLogApp.#onSetSide,
-      toggleSharing: CombatLogApp.#onToggleSharing,
+      saveSharing: CombatLogApp.#onSaveSharing,
+      stopSharing: CombatLogApp.#onStopSharing,
       renameLog: CombatLogApp.#onRenameLog,
       postPlayerReport: CombatLogApp.#onPostPlayerReport,
       createJournalReport: CombatLogApp.#onCreateJournalReport,
@@ -31,7 +35,8 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       exportMarkdown: CombatLogApp.#onExportMarkdown,
       openLog: CombatLogApp.#onOpenLog,
       deleteLog: CombatLogApp.#onDeleteLog,
-      sortDpr: CombatLogApp.#onSortDpr
+      sortDpr: CombatLogApp.#onSortDpr,
+      addAdjustment: CombatLogApp.#onAddAdjustment
     }
   };
 
@@ -48,9 +53,22 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     globalThis.Hooks?.on?.(HOOKS.LOG_UPDATED, this.onLogUpdated);
   }
 
+  // Resolved on every render so the module language setting applies to the window title.
+  get title() {
+    return localize("SCLS.App.Title");
+  }
+
   async close(options = {}) {
     globalThis.Hooks?.off?.(HOOKS.LOG_UPDATED, this.onLogUpdated);
     return super.close(options);
+  }
+
+  showLog(logId = null) {
+    if (logId) {
+      this.logId = logId;
+      this.activeTab = "summary";
+    }
+    void this.render({ force: true });
   }
 
   async _renderHTML(context) {
@@ -62,11 +80,24 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
   }
 
   async getLog() {
-    if (this.logId) return this.service.persistence.loadLog(this.logId);
+    if (this.logId) return this.service.getLog ? this.service.getLog(this.logId) : this.service.persistence.loadLog(this.logId);
     return this.service.listActiveLogs()[0] ?? null;
   }
 
+  // While a combat runs, only the recording GM holds the live log. A change made by another GM would be overwritten.
+  canEdit(log, { quiet = false } = {}) {
+    if (log?.status !== LOG_STATUS.ACTIVE || isTrackingGM()) return true;
+    if (!quiet) ui.notifications?.warn(format("SCLS.Notification.RecordedElsewhere", { name: game.users?.activeGM?.name ?? "" }));
+    return false;
+  }
+
+  async getEditableLog() {
+    const log = await this.getLog();
+    return log && this.canEdit(log) ? log : null;
+  }
+
   async _prepareContext(_options) {
+    await this.service.flushPendingSaves?.();
     const log = await this.getLog();
     const historyEntries = await this.service.persistence.loadHistoryEntries();
     if (!log) {
@@ -82,6 +113,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     }
     if (!TABS.includes(this.activeTab)) this.activeTab = "summary";
     const computed = log.computed ?? {};
+    const participantOptions = participantChoices(log);
     return {
       hasLog: true,
       hasHistory: historyEntries.length > 0,
@@ -92,18 +124,19 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       tabNavigation: tabNavigation(true, this.activeTab),
       historyRows: historyRows(historyEntries, log.id),
       summary: summaryContext(log),
-      timelineEvents: timelineEvents(log),
       combatRounds: combatRounds(log),
       combatMetrics: combatMetrics(log),
       correctionEvents: correctionEvents(log),
       manualAdjustmentEvents: manualAdjustmentEvents(log),
+      manualTypeOptions: MANUAL_TYPES.map((value) => ({ value, label: manualTypeLabel(value) })),
+      participantOptions,
       participants: participantRows(log),
       dprRows: sortedDprRows(log, this.dprSort),
       dprColumns: dprColumns(this.dprSort),
-      sideRows: computed.dpr?.bySide ?? [],
-      rawEvents: log.events ?? [],
+      dprMethodLabel: localize(`SCLS.DprMethod.${computed.dpr?.method ?? "appliedNet"}`),
+      sideRows: sideRows(log),
+      sharing: sharingContext(log, this.playerReports),
       reportSectionOptions: reportSectionOptions(log),
-      canShareReport: this.playerReports.canShare(reportReadyLog(log)),
       includeUnclearDeltasInStats: getSetting(SETTINGS.INCLUDE_UNCLEAR_DELTAS_IN_STATS, false)
     };
   }
@@ -119,7 +152,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
   }
 
   async saveLog(log) {
-    await this.service.saveAndCompute(log);
+    await this.service.saveAndCompute(log, { immediate: true });
     await this.render();
   }
 
@@ -130,10 +163,47 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     setTimeout(() => {
       this.liveRenderQueued = false;
       void this.render();
-    }, 100);
+    }, 250);
   }
 
-  static async #onTab(event, target) {
+  async handleSelectChange(event) {
+    const target = event.currentTarget;
+    switch (target.dataset.sclsAction) {
+      case "classify": return this.classifyEvent(target.dataset.eventId, target.value);
+      case "setSource": return this.setEventSource(target.dataset.eventId, target.value);
+      case "setSide": return this.setParticipantSide(target.dataset.combatantId, target.value);
+      default: return null;
+    }
+  }
+
+  async classifyEvent(eventId, interpretation) {
+    const log = await this.getEditableLog();
+    const eventEntry = log?.events?.find((entry) => entry.id === eventId);
+    if (!eventEntry) return;
+    eventEntry.data.interpretedAs = interpretation;
+    eventEntry.confidence = CONFIDENCE.MANUAL;
+    eventEntry.data.manualCorrection = true;
+    await this.saveLog(log);
+  }
+
+  async setEventSource(eventId, combatantId) {
+    const log = await this.getEditableLog();
+    if (!log || !this.service.setEventSource(log, eventId, combatantId)) return;
+    const eventEntry = log.events.find((entry) => entry.id === eventId);
+    eventEntry.data.manualCorrection = true;
+    await this.saveLog(log);
+  }
+
+  async setParticipantSide(combatantId, side) {
+    const log = await this.getEditableLog();
+    const participant = log?.participants?.find((entry) => entry.combatantId === combatantId);
+    if (!participant) return;
+    participant.side = side;
+    participant.sideLocked = true;
+    await this.saveLog(log);
+  }
+
+  static async #onTab(_event, target) {
     this.activeTab = target.dataset.tab;
     await this.render();
   }
@@ -146,13 +216,9 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
 
   static async #onSortDpr(_event, target) {
     const key = target.dataset.sortKey;
-    const column = DPR_COLUMNS.find((entry) => entry.key === key);
-    if (!column) return;
+    if (!DPR_COLUMNS.some((entry) => entry.key === key)) return;
     const current = this.dprSort ?? {};
-    this.dprSort = {
-      key,
-      direction: current.key === key && current.direction === "desc" ? "asc" : "desc"
-    };
+    this.dprSort = { key, direction: current.key === key && current.direction === "desc" ? "asc" : "desc" };
     await this.render();
   }
 
@@ -160,40 +226,15 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     const logId = target.dataset.logId;
     if (!logId) return;
     const title = String(target.dataset.logTitle ?? "").trim();
-    const confirmed = await confirmDeleteCombatLog(title);
-    if (!confirmed) return;
-    const deleted = await this.service.deleteLog(logId);
-    if (!deleted) return;
+    if (!await confirmDeleteCombatLog(title)) return;
+    if (!await this.service.deleteLog(logId)) return;
     if (this.logId === logId) this.logId = null;
     this.activeTab = "history";
     await this.render();
   }
 
-  static async #onClassify(event, target) {
-    const log = await this.getLog();
-    const eventId = target.dataset.eventId;
-    const eventEntry = log?.events?.find((entry) => entry.id === eventId);
-    if (!eventEntry) return;
-    eventEntry.data.interpretedAs = target.value;
-    eventEntry.confidence = "manual";
-    eventEntry.data.manualCorrection = true;
-    await this.saveLog(log);
-  }
-
-  async handleSelectChange(event) {
-    const target = event.currentTarget;
-    switch (target.dataset.sclsAction) {
-      case "classify":
-        return CombatLogApp.#onClassify.call(this, event, target);
-      case "setSide":
-        return CombatLogApp.#onSetSide.call(this, event, target);
-      default:
-        return null;
-    }
-  }
-
   static async #onIgnoreEvent(_event, target) {
-    const log = await this.getLog();
+    const log = await this.getEditableLog();
     const eventEntry = log?.events?.find((entry) => entry.id === target.dataset.eventId);
     if (!eventEntry) return;
     eventEntry.ignored = true;
@@ -201,35 +242,55 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
   }
 
   static async #onRestoreEvent(_event, target) {
-    const log = await this.getLog();
+    const log = await this.getEditableLog();
     const eventEntry = log?.events?.find((entry) => entry.id === target.dataset.eventId);
     if (!eventEntry) return;
     eventEntry.ignored = false;
     await this.saveLog(log);
   }
 
-  static async #onSetSide(event, target) {
-    const log = await this.getLog();
-    const participant = log?.participants?.find((entry) => entry.combatantId === target.dataset.combatantId);
-    if (!participant) return;
-    participant.side = target.value;
+  static async #onAddAdjustment(_event, target) {
+    const log = await this.getEditableLog();
+    if (!log) return;
+    const form = new FormData(target.closest("form"));
+    const added = this.service.addManualAdjustment(log, {
+      type: String(form.get("adjustmentType") ?? ""),
+      amount: Number(form.get("adjustmentAmount") ?? 0),
+      sourceCombatantId: String(form.get("adjustmentSource") ?? ""),
+      targetCombatantId: String(form.get("adjustmentTarget") ?? ""),
+      note: String(form.get("adjustmentNote") ?? "")
+    });
+    if (!added) {
+      ui.notifications?.warn(localize("SCLS.Notification.AdjustmentInvalid"));
+      return;
+    }
     await this.saveLog(log);
+    ui.notifications?.info(localize("SCLS.Notification.AdjustmentAdded"));
   }
 
-  static async #onToggleSharing(event, target) {
-    const log = await this.getLog();
+  static async #onSaveSharing(_event, target) {
+    const log = await this.getEditableLog();
     if (!log) return;
-    const form = target.closest("form");
-    const formData = new FormData(form);
-    applyReportSettings(log, formData);
+    applyReportSettings(log, new FormData(target.closest("form")));
+    this.playerReports.appendShareEvent(log, log.shareSettings.shareStartedAt === log.shareSettings.shareUpdatedAt ? "created" : "updated", { shareMode: log.shareSettings.shareMode });
     await this.saveLog(log);
+    ui.notifications?.info(localize("SCLS.Notification.SharingSaved"));
+  }
+
+  static async #onStopSharing() {
+    const log = await this.getEditableLog();
+    if (!log) return;
+    log.shareSettings = { ...log.shareSettings, isShared: false, shareUpdatedAt: new Date().toISOString() };
+    log.events.push(shareRevokedEvent(log));
+    await this.playerReports.revokeJournalReports(log);
+    await this.saveLog(log);
+    ui.notifications?.info(localize("SCLS.Notification.SharingStopped"));
   }
 
   static async #onRenameLog(_event, target) {
-    const log = await this.getLog();
+    const log = await this.getEditableLog();
     if (!log) return;
-    const form = target.closest("form");
-    const title = String(new FormData(form).get("title") ?? "").trim();
+    const title = String(new FormData(target.closest("form")).get("title") ?? "").trim();
     if (!title || title === log.title) return;
     log.title = title;
     log.lastSeenAt = new Date().toISOString();
@@ -237,35 +298,43 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
   }
 
   static async #onPostPlayerReport(_event, target) {
-    const log = await this.getLog();
+    const log = await this.getEditableLog();
     if (!log) return;
     applyReportSettings(log, new FormData(target.closest("form")));
-    await this.playerReports.postChatSummary(log);
+    const message = await this.playerReports.postChatSummary(log);
     await this.saveLog(log);
+    if (message) ui.notifications?.info(localize("SCLS.Notification.ReportPosted"));
+    else ui.notifications?.warn(localize("SCLS.Notification.ReportNotShared"));
   }
 
   static async #onCreateJournalReport(_event, target) {
-    const log = await this.getLog();
+    const log = await this.getEditableLog();
     if (!log) return;
     applyReportSettings(log, new FormData(target.closest("form")));
-    await this.playerReports.createJournalReport(log);
+    const entry = await this.playerReports.createJournalReport(log);
     await this.saveLog(log);
+    if (entry) {
+      ui.notifications?.info(format("SCLS.Notification.JournalCreated", { name: entry.name ?? log.title }));
+      entry.sheet?.render?.(true);
+    } else ui.notifications?.warn(localize("SCLS.Notification.ReportNotShared"));
   }
 
   static async #onExportJson() {
     const log = await this.getLog();
     if (!log) return;
-    this.exporter.appendExportEvent(log, "json");
+    const record = this.canEdit(log, { quiet: true });
+    if (record) this.exporter.appendExportEvent(log, "json");
     this.exporter.exportJson(log);
-    await this.saveLog(log);
+    if (record) await this.saveLog(log);
   }
 
   static async #onExportMarkdown() {
     const log = await this.getLog();
     if (!log) return;
-    this.exporter.appendExportEvent(log, "markdown");
+    const record = this.canEdit(log, { quiet: true });
+    if (record) this.exporter.appendExportEvent(log, "markdown");
     this.exporter.exportMarkdown(log);
-    await this.saveLog(log);
+    if (record) await this.saveLog(log);
   }
 }
 
@@ -285,25 +354,66 @@ async function confirmDeleteCombatLog(title = "") {
       no: { label: cancelLabel }
     }));
   }
-  if (typeof globalThis.Dialog?.confirm === "function") {
-    return Boolean(await globalThis.Dialog.confirm({ title: dialogTitle, content, yes: () => true, no: () => false, defaultYes: false }));
-  }
   const message = title ? `${localize("SCLS.Confirm.DeleteCombat")}\n\n${title}` : localize("SCLS.Confirm.DeleteCombat");
   return Boolean(globalThis.confirm?.(message));
 }
 
+function shareRevokedEvent(log) {
+  return {
+    id: `share-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    type: EVENT_TYPES.SHARE_REVOKED,
+    createdAt: new Date().toISOString(),
+    sequence: (log.events?.length ?? 0) + 1,
+    round: null,
+    turn: null,
+    combatantId: "",
+    actorUuid: "",
+    tokenUuid: "",
+    sceneUuid: log.sceneUuid ?? "",
+    userId: game?.user?.id ?? "",
+    visibility: "gm",
+    source: { kind: SOURCE_KINDS.MANUAL, id: "revoked" },
+    confidence: CONFIDENCE.MANUAL,
+    ignored: false,
+    tags: ["share"],
+    data: {}
+  };
+}
+
 function summaryContext(log) {
+  const summary = log.computed?.summary ?? {};
   return {
     title: log.title,
     status: log.status,
+    statusLabel: localize(`SCLS.Status.${log.status}`),
+    isShared: Boolean(log.shareSettings?.isShared),
     startedAt: formatDateTime(log.startedAt),
     endedAt: log.endedAt ? formatDateTime(log.endedAt) : "-",
-    activeDuration: formatDuration(log.computed?.summary?.activeDurationMs ?? 0),
+    activeDuration: formatDuration(summary.activeDurationMs ?? 0),
     sessionCount: log.sessionSegments?.length ?? 0,
-    rounds: log.computed?.summary?.rounds ?? 0,
+    roundsLabel: countLabel("SCLS.Count.Rounds", summary.rounds ?? 0),
+    sessionsLabel: countLabel("SCLS.Count.Sessions", log.sessionSegments?.length ?? 0),
+    rounds: summary.rounds ?? 0,
     participants: log.participants?.length ?? 0,
-    warnings: log.computed?.warnings ?? []
+    partyDowned: summary.partyDowned ?? 0,
+    enemiesDefeated: summary.enemiesDefeated ?? 0,
+    criticalHits: summary.criticalHits ?? 0,
+    warnings: warningLines(log.computed?.warningCounts ?? {})
   };
+}
+
+// "1 round" and "3 rounds" need their own keys in both languages.
+function countLabel(key, count) {
+  return count === 1 ? localize(`${key}One`) : format(`${key}Other`, { count });
+}
+
+function warningLines(counts) {
+  const lines = [];
+  for (const [code, key] of [["unclearExcluded", "SCLS.Warning.UnclearExcluded"], ["manualIncluded", "SCLS.Warning.ManualIncluded"]]) {
+    const count = Number(counts[code]) || 0;
+    if (count) lines.push(countLabel(key, count));
+  }
+  return lines;
 }
 
 function visibleTabs(hasLog, activeTab) {
@@ -332,7 +442,7 @@ function tabNavigation(hasLog, activeTab) {
     detailTabs: hasLog ? tabs.filter((tab) => tab.id !== "history") : [],
     showConnector: Boolean(hasLog),
     connectorLabel: localize("SCLS.Navigation.SelectedCombat"),
-    connectorArrow: "-->"
+    connectorIcon: "fa-solid fa-angles-right"
   };
 }
 
@@ -348,22 +458,39 @@ function historyRows(entries, selectedLogId = "") {
   }));
 }
 
-function timelineEvents(log) {
-  return (log.events ?? []).map((event) => ({
-    ...event,
-    label: naturalEventLabel(event),
-    createdLabel: formatDateTime(event.createdAt)
-  }));
+function participantLookup(log) {
+  const byCombatantId = new Map();
+  for (const participant of log.participants ?? []) if (participant.combatantId) byCombatantId.set(participant.combatantId, participant);
+  return { byCombatantId };
+}
+
+function participantName(participants, combatantId, fallback = "-") {
+  return participants.byCombatantId.get(combatantId)?.name ?? fallback;
+}
+
+// Rolls that led to an applied hit point change are shown through that change, not twice.
+function appliedRollMessageIds(log) {
+  const ids = new Set();
+  const rollsById = new Map((log.events ?? []).filter((event) => String(event.type).startsWith("roll.")).map((event) => [event.id, event]));
+  for (const event of log.events ?? []) {
+    const correlation = event.data?.correlation;
+    if (!correlation) continue;
+    if (correlation.messageId) ids.add(correlation.messageId);
+    const roll = rollsById.get(correlation.rollEventId);
+    if (roll?.source?.id) ids.add(roll.source.id);
+  }
+  return ids;
 }
 
 function combatRounds(log) {
   const participants = participantLookup(log);
+  const appliedMessages = appliedRollMessageIds(log);
   const roundNumbers = new Set((log.events ?? []).map((event) => Number(event.round) || 0).filter((round) => round > 0));
   const maxRound = Math.max(0, log.computed?.summary?.rounds ?? 0, ...roundNumbers);
   const rounds = [];
   for (let round = 1; round <= maxRound; round += 1) {
     const events = (log.events ?? []).filter((event) => (Number(event.round) || 0) === round && !event.ignored);
-    const actions = events.map((event) => roundAction(event, participants)).filter(Boolean);
+    const actions = events.flatMap((event) => roundActions(event, participants, appliedMessages));
     if (!actions.length) continue;
     const heroDamage = sumRoundAmount(actions, SIDES.FRIENDLY, "damage");
     const foeDamage = sumRoundAmount(actions, SIDES.HOSTILE, "damage");
@@ -382,30 +509,152 @@ function combatRounds(log) {
   return rounds;
 }
 
+function roundActions(event, participants, appliedMessages) {
+  const sourceId = sourceCombatantId(event);
+  const targetId = targetCombatantId(event);
+  const source = participants.byCombatantId.get(sourceId) ?? null;
+  const side = source?.side ?? participants.byCombatantId.get(targetId)?.side ?? SIDES.UNKNOWN;
+  const actor = source?.name ?? "-";
+  const target = participantName(participants, targetId, event.data?.targetName ?? "-");
+  const amount = eventAmount(event);
+  const detail = actionName(event);
+  const rows = [];
+  if (isResourceDelta(event)) {
+    if (isDamageApplied(event)) {
+      if (isDamageDealt(event)) rows.push(actionRow(event, "damage", side, actor, target, amount, localize("SCLS.Protocol.Damage"), detail));
+      else rows.push(actionRow(event, "taken", participants.byCombatantId.get(targetId)?.side ?? SIDES.UNKNOWN, target, "-", amount, localize("SCLS.Protocol.DamageTaken"), detail));
+    } else if (isHealingApplied(event)) {
+      rows.push(actionRow(event, "healing", side, source ? actor : "-", target, amount, localize("SCLS.Protocol.Healing"), detail));
+    } else if (isCorrectionInterpretation(event.data?.interpretedAs)) {
+      rows.push(actionRow(event, "correction", side, actor, target, amount, localize(`SCLS.Interpretation.${event.data.interpretedAs}`)));
+    }
+    if (isDowned(event)) rows.push(actionRow(event, "downed", participants.byCombatantId.get(targetId)?.side ?? SIDES.UNKNOWN, target, "-", 0, localize("SCLS.Protocol.Downed")));
+    return rows;
+  }
+  switch (event.type) {
+    case EVENT_TYPES.DAMAGE_APPLIED:
+    case EVENT_TYPES.DAMAGE_MANUAL_ADDED:
+      return [actionRow(event, "damage", side, actor, target, amount, localize(event.type === EVENT_TYPES.DAMAGE_APPLIED ? "SCLS.Protocol.Damage" : "SCLS.Manual.damageAdd"), detail)];
+    case EVENT_TYPES.DAMAGE_MANUAL_REDUCED:
+      return [actionRow(event, "correction", side, actor, target, amount, localize("SCLS.Protocol.DamageReduced"), detail)];
+    case EVENT_TYPES.HEALING_APPLIED:
+    case EVENT_TYPES.HEALING_MANUAL_ADDED:
+      return [actionRow(event, "healing", side, actor, target, amount, localize(event.type === EVENT_TYPES.HEALING_APPLIED ? "SCLS.Protocol.Healing" : "SCLS.Manual.healingAdd"), detail)];
+    case EVENT_TYPES.HEALING_MANUAL_REDUCED:
+      return [actionRow(event, "correction", side, actor, target, amount, localize("SCLS.Protocol.HealingReduced"), detail)];
+    case EVENT_TYPES.ROLL_ATTACK:
+      if (event.data?.isCritical) return [actionRow(event, "roll", side, actor, target, 0, localize("SCLS.Protocol.CriticalHit"), detail)];
+      if (event.data?.isFumble) return [actionRow(event, "roll", side, actor, target, 0, localize("SCLS.Protocol.Fumble"), detail)];
+      return [];
+    case EVENT_TYPES.ROLL_DAMAGE:
+    case EVENT_TYPES.ROLL_HEALING:
+      if (appliedMessages.has(event.source?.id)) return [];
+      return [actionRow(event, "roll", side, actor, target, amount, localize(event.type === EVENT_TYPES.ROLL_DAMAGE ? "SCLS.Protocol.DamageRollOpen" : "SCLS.Protocol.HealingRollOpen"), detail)];
+    case EVENT_TYPES.ACTIVE_EFFECT_CREATED:
+      return [actionRow(event, isControl(event) ? "control" : "effect", side, actor, target, 0, localize(isControl(event) ? "SCLS.Protocol.ControlAdded" : "SCLS.Protocol.EffectAdded"), event.data?.name ?? "")];
+    case EVENT_TYPES.ACTIVE_EFFECT_DELETED:
+      return [actionRow(event, "effect", side, "-", target, 0, localize("SCLS.Protocol.EffectRemoved"), event.data?.name ?? "")];
+    default:
+      return [];
+  }
+}
+
+function isCorrectionInterpretation(value) {
+  return [RESOURCE_INTERPRETATIONS.CORRECTION_DAMAGE_UP, RESOURCE_INTERPRETATIONS.CORRECTION_DAMAGE_DOWN, RESOURCE_INTERPRETATIONS.CORRECTION_HEALING_UP, RESOURCE_INTERPRETATIONS.CORRECTION_HEALING_DOWN].includes(value);
+}
+
+function actionRow(event, kind, side, actor, target, amount, verb, detail = "") {
+  return {
+    id: event.id,
+    kind,
+    side,
+    actor,
+    target,
+    amount,
+    verb,
+    detail,
+    confidence: event.confidence,
+    confidenceLabel: localize(`SCLS.Confidence.${event.confidence}`),
+    time: formatDateTime(event.createdAt),
+    amountLabel: amount > 0 ? String(amount) : "-"
+  };
+}
+
+function sumRoundAmount(actions, side, kind) {
+  return actions.filter((action) => action.side === side && action.kind === kind).reduce((total, action) => total + action.amount, 0);
+}
+
+function roundSummary(heroDamage, foeDamage, healing, actionCount) {
+  const parts = [countLabel("SCLS.Protocol.ActionCount", actionCount)];
+  if (heroDamage) parts.push(`${localize("SCLS.Protocol.Heroes")}: ${heroDamage}`);
+  if (foeDamage) parts.push(`${localize("SCLS.Protocol.Enemies")}: ${foeDamage}`);
+  if (healing) parts.push(`${localize("SCLS.Protocol.HealingShort")}: ${healing}`);
+  return parts.join(" | ");
+}
+
+// Hit point changes that need the GM: unclear ones, ambiguous ones, already corrected ones and
+// damage or healing whose source is unknown.
 function correctionEvents(log) {
+  const participants = participantLookup(log);
   return (log.events ?? [])
-    .filter((event) => [EVENT_TYPES.RESOURCE_DELTA, EVENT_TYPES.RESOURCE_DELTA_OFFLINE].includes(event.type))
-    .filter((event) => event.confidence === CONFIDENCE.UNCLEAR || event.data?.correlation?.status === "ambiguous" || event.data?.manualCorrection)
-    .map((event) => ({
-      ...event,
-      interpretationOptions: interpretationOptions(event.data?.interpretedAs)
-    }));
+    .filter((event) => isResourceDelta(event))
+    .filter((event) => event.confidence === CONFIDENCE.UNCLEAR
+      || event.data?.correlation?.status === "ambiguous"
+      || event.data?.manualCorrection
+      || ((isDamageApplied(event) || isHealingApplied(event)) && !isSourceAttributed(event)))
+    .map((event) => {
+      const targetId = targetCombatantId(event);
+      const sourceId = isSourceAttributed(event) ? sourceCombatantId(event) : "";
+      return {
+        ...event,
+        label: localize(event.type === EVENT_TYPES.RESOURCE_DELTA_OFFLINE ? "SCLS.Event.ResourceDeltaOffline" : "SCLS.Event.ResourceDelta"),
+        roundLabel: event.round ? format("SCLS.Protocol.RoundNumber", { round: event.round }) : "-",
+        targetName: participantName(participants, targetId),
+        confidenceLabel: localize(`SCLS.Confidence.${event.confidence}`),
+        reasonLabel: correctionReason(event),
+        interpretationOptions: interpretationOptions(event.data?.interpretedAs),
+        sourceOptions: [{ value: "", label: localize("SCLS.Label.UnknownSource"), selected: !sourceId }].concat(
+          (log.participants ?? []).filter((participant) => participant.combatantId !== targetId).map((participant) => ({ value: participant.combatantId, label: participant.name, selected: participant.combatantId === sourceId }))
+        )
+      };
+    });
+}
+
+function correctionReason(event) {
+  if (event.data?.manualCorrection) return localize("SCLS.Correction.Corrected");
+  if (event.type === EVENT_TYPES.RESOURCE_DELTA_OFFLINE) return localize("SCLS.Correction.Offline");
+  if (event.data?.correlation?.status === "ambiguous") return localize("SCLS.Correction.Ambiguous");
+  if (event.confidence === CONFIDENCE.UNCLEAR) return localize("SCLS.Correction.Unclear");
+  return localize("SCLS.Correction.NoSource");
 }
 
 function manualAdjustmentEvents(log) {
+  const participants = participantLookup(log);
   return (log.events ?? [])
-    .filter((event) => isManualAdjustmentEvent(event))
-    .map((event) => {
-      const participant = (log.participants ?? []).find((entry) => entry.combatantId === event.combatantId || entry.actorUuid === event.actorUuid);
-      return {
-        ...event,
-        label: manualAdjustmentLabel(event),
-        amount: event.data?.amount ?? 0,
-        note: event.data?.note ?? "",
-        participantName: participant?.name ?? event.combatantId ?? "-",
-        createdLabel: formatDateTime(event.createdAt)
-      };
-    });
+    .filter((event) => MANUAL_TYPES.includes(event.type))
+    .map((event) => ({
+      ...event,
+      label: manualTypeLabel(event.type),
+      amount: event.data?.amount ?? 0,
+      note: event.data?.note ?? "",
+      participantName: participantName(participants, event.combatantId),
+      targetName: participantName(participants, event.data?.targetCombatantId),
+      createdLabel: formatDateTime(event.createdAt)
+    }));
+}
+
+function manualTypeLabel(type) {
+  switch (type) {
+    case EVENT_TYPES.DAMAGE_MANUAL_ADDED: return localize("SCLS.Manual.damageAdd");
+    case EVENT_TYPES.DAMAGE_MANUAL_REDUCED: return localize("SCLS.Manual.damageReduce");
+    case EVENT_TYPES.HEALING_MANUAL_ADDED: return localize("SCLS.Manual.healingAdd");
+    case EVENT_TYPES.HEALING_MANUAL_REDUCED: return localize("SCLS.Manual.healingReduce");
+    default: return type;
+  }
+}
+
+function participantChoices(log) {
+  return [{ value: "", label: localize("SCLS.Label.UnknownSource") }].concat((log.participants ?? []).map((participant) => ({ value: participant.combatantId, label: participant.name })));
 }
 
 function participantRows(log) {
@@ -417,15 +666,20 @@ function participantRows(log) {
 
 function dprRows(log) {
   const participants = participantLookup(log);
-  const disciplineStats = disciplineStatsByCombatant(log, participants);
-  return (log.computed?.dpr?.byCombatant ?? []).map((row) => {
-    const participant = participants.byCombatantId.get(row.id) ?? participants.byName.get(normalizeLabel(row.name));
-    const disciplines = disciplineStats.get(row.id) ?? emptyDisciplineStats();
+  return (log.computed?.dpr?.byCombatant ?? log.computed?.byCombatant ?? []).map((row) => {
+    const participant = participants.byCombatantId.get(row.id);
     return {
       ...row,
-      ...disciplines,
+      healing: Number(row.healingNet ?? 0),
+      martial: Number(row.martial ?? 0),
+      ranged: Number(row.ranged ?? 0),
+      magic: Number(row.magic ?? 0),
+      control: Number(row.control ?? 0),
+      downed: Number(row.downed ?? 0),
+      takedowns: Number(row.takedowns ?? 0),
       img: participant?.img ?? "icons/svg/mystery-man.svg",
-      name: row.name || participant?.name || row.id || "-"
+      name: row.name || participant?.name || row.id || "-",
+      sideLabel: localize(`SCLS.Side.${row.side ?? SIDES.UNKNOWN}`)
     };
   });
 }
@@ -440,6 +694,7 @@ const DPR_COLUMNS = Object.freeze([
   { key: "ranged", labelKey: "SCLS.Label.Ranged", type: "number" },
   { key: "magic", labelKey: "SCLS.Label.Magic", type: "number" },
   { key: "control", labelKey: "SCLS.Label.Control", type: "number" },
+  { key: "takedowns", labelKey: "SCLS.Label.Takedowns", type: "number" },
   { key: "downed", labelKey: "SCLS.Label.Downed", type: "number" },
   { key: "netDPR", labelKey: "SCLS.Label.NetDPR", type: "number" }
 ]);
@@ -473,20 +728,38 @@ function compareDprValues(left, right, type) {
   return String(left ?? "").localeCompare(String(right ?? ""), String(game?.i18n?.lang ?? "en"), { sensitivity: "base", numeric: true });
 }
 
+function sideRows(log) {
+  const presentSides = new Set((log.participants ?? []).map((participant) => participant.side ?? SIDES.UNKNOWN));
+  return (log.computed?.dpr?.bySide ?? []).filter((row) => presentSides.has(row.id)).map((row) => ({ ...row, label: localize(`SCLS.Side.${row.id}`) }));
+}
+
 function combatMetrics(log) {
   const rows = dprRows(log);
-  const participants = participantLookup(log);
+  const summary = log.computed?.summary ?? {};
   const topDamage = Math.max(0, ...rows.map((row) => Number(row.damageAppliedNet) || 0));
   const topHealing = Math.max(0, ...rows.map((row) => Number(row.healing) || 0));
-  const contributionRows = rows.slice(0, 8).map((row) => ({
-    ...row,
-    damagePercent: percent(row.damageAppliedNet, topDamage),
-    healingPercent: percent(row.healing, topHealing),
-    impactMetrics: impactMetrics(row)
-  }));
-  const totals = disciplineTotals(log, participants);
+  const contributionRows = [...rows]
+    .sort((left, right) => (Number(right.damageAppliedNet) || 0) - (Number(left.damageAppliedNet) || 0) || (Number(right.healing) || 0) - (Number(left.healing) || 0))
+    .slice(0, 10)
+    .map((row) => ({
+      ...row,
+      damagePercent: percent(row.damageAppliedNet, topDamage),
+      healingPercent: percent(row.healing, topHealing),
+      impactMetrics: impactMetrics(row)
+    }));
+  const totals = {
+    damage: Number(summary.netDamageApplied ?? 0),
+    healing: Number(summary.netHealingApplied ?? 0),
+    martial: sum(rows, "martial"),
+    ranged: sum(rows, "ranged"),
+    magic: sum(rows, "magic"),
+    control: sum(rows, "control"),
+    partyDowned: Number(summary.partyDowned ?? 0),
+    enemiesDefeated: Number(summary.enemiesDefeated ?? 0)
+  };
+  totals.downed = totals.partyDowned + totals.enemiesDefeated;
   const outputTotal = Math.max(1, totals.damage, totals.healing);
-  const actionTotal = Math.max(1, totals.actionCount);
+  const actionTotal = Math.max(1, totals.martial + totals.ranged + totals.magic + totals.control + totals.downed);
   const disciplineRows = [
     metricDiscipline("damage", localize("SCLS.Label.NetDamage"), totals.damage, outputTotal, "damage"),
     metricDiscipline("healing", localize("SCLS.Label.Healing"), totals.healing, outputTotal, "healing"),
@@ -494,32 +767,20 @@ function combatMetrics(log) {
     metricDiscipline("ranged", localize("SCLS.Label.Ranged"), totals.ranged, actionTotal, "ranged"),
     metricDiscipline("magic", localize("SCLS.Label.Magic"), totals.magic, actionTotal, "magic"),
     metricDiscipline("control", localize("SCLS.Label.Control"), totals.control, actionTotal, "control"),
-    metricDiscipline("downed", localize("SCLS.Label.Downed"), totals.downed, actionTotal, "downed")
+    metricDiscipline("enemiesDefeated", localize("SCLS.Label.EnemiesDefeated"), totals.enemiesDefeated, actionTotal, "downed"),
+    metricDiscipline("partyDowned", localize("SCLS.Label.PartyDowned"), totals.partyDowned, actionTotal, "downed")
   ];
   return {
     pressureRows: pressureRows(log),
     contributionRows,
     disciplineRows,
-    topActions: topActions(log, participants),
+    topActions: topActions(log),
     totals
   };
 }
 
-function disciplineTotals(log, participants) {
-  const totals = { damage: 0, healing: 0, martial: 0, ranged: 0, magic: 0, control: 0, downed: 0, actionCount: 0 };
-  for (const event of log.events ?? []) {
-    if (event.ignored) continue;
-    const amount = eventAmount(event);
-    if (isDamageDealtEvent(event)) totals.damage += amount;
-    if (isHealingEvent(event)) totals.healing += amount;
-    if (isDamageDealtEvent(event) && isMartialAction(event)) totals.martial += 1;
-    if (isDamageDealtEvent(event) && isRangedAction(event)) totals.ranged += 1;
-    if (isDamageDealtEvent(event) && isMagicAction(event)) totals.magic += 1;
-    if (isControlEvent(event)) totals.control += 1;
-    if (targetFellToZero(event) && targetForEvent(event, participants)?.side === SIDES.FRIENDLY) totals.downed += 1;
-    if (isDamageDealtEvent(event) || isHealingEvent(event) || isControlEvent(event)) totals.actionCount += 1;
-  }
-  return totals;
+function sum(rows, key) {
+  return rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
 }
 
 function metricDiscipline(id, label, value, total, tone) {
@@ -527,27 +788,24 @@ function metricDiscipline(id, label, value, total, tone) {
 }
 
 function pressureRows(log) {
-  const rows = log.computed?.dpr?.bySide ?? [];
+  const rows = sideRows(log);
   const topDamage = Math.max(0, ...rows.map((row) => Number(row.damageAppliedNet) || 0));
-  return rows.map((row) => ({
-    ...row,
-    label: localize(`SCLS.Side.${row.id ?? row.name}`),
-    pressurePercent: percent(row.damageAppliedNet, topDamage)
-  }));
+  return rows.map((row) => ({ ...row, pressurePercent: percent(row.damageAppliedNet, topDamage) }));
 }
 
-function topActions(log, participants) {
+function topActions(log) {
+  const participants = participantLookup(log);
   const actions = new Map();
   for (const event of log.events ?? []) {
-    if (event.ignored || !(isDamageDealtEvent(event) || isHealingEvent(event) || isControlEvent(event))) continue;
-    const name = actionDetail(event) || event.data?.name || event.type;
-    const kind = actionKind(event);
+    if (event.ignored) continue;
+    const kind = isDamageDealt(event) ? "damage" : (isHealingApplied(event) && isSourceAttributed(event)) ? "healing" : isControl(event) ? "control" : null;
+    if (!kind) continue;
+    const name = (kind === "control" ? event.data?.name : actionName(event)) || localize(`SCLS.ActionKind.${kind}`);
     const key = `${kind}:${normalizeLabel(name)}`;
-    const source = participantForEvent(event, participants);
-    const amount = eventAmount(event);
-    const row = actions.get(key) ?? { name, kind, uses: 0, amount: 0, actors: new Set() };
+    const source = participants.byCombatantId.get(sourceCombatantId(event));
+    const row = actions.get(key) ?? { name, kind, kindLabel: localize(`SCLS.ActionKind.${kind}`), style: actionKind(event), uses: 0, amount: 0, actors: new Set() };
     row.uses += 1;
-    row.amount += amount;
+    row.amount += kind === "control" ? 0 : eventAmount(event);
     if (source?.name) row.actors.add(source.name);
     actions.set(key, row);
   }
@@ -557,31 +815,20 @@ function topActions(log, participants) {
     .slice(0, 8);
 }
 
-function actionKind(event) {
-  if (isHealingEvent(event)) return "healing";
-  if (isControlEvent(event)) return "control";
-  if (isDamageDealtEvent(event)) return "damage";
-  return "utility";
-}
-
 function impactMetrics(row) {
   const metrics = [
     impactMetric("damage", "fa-solid fa-burst", localize("SCLS.Label.DamageDealt"), row.damageAppliedNet),
     impactMetric("taken", "fa-solid fa-shield-heart", localize("SCLS.Label.DamageTaken"), row.damageTakenNet),
     impactMetric("healing", "fa-solid fa-heart-pulse", localize("SCLS.Label.Healing"), row.healing),
     impactMetric("control", "fa-solid fa-hand-sparkles", localize("SCLS.Label.Control"), row.control),
+    impactMetric("takedowns", "fa-solid fa-crosshairs", localize("SCLS.Label.Takedowns"), row.takedowns),
     impactMetric("downed", "fa-solid fa-skull", localize("SCLS.Label.Downed"), row.downed)
   ].filter((metric) => metric.value);
   return metrics.length ? metrics : [impactMetric("empty", "fa-solid fa-minus", "", "-")];
 }
 
 function impactMetric(type, icon, label, value) {
-  return {
-    type,
-    icon,
-    label,
-    value
-  };
+  return { type, icon, label, value };
 }
 
 function percent(value, total) {
@@ -591,53 +838,18 @@ function percent(value, total) {
   return Math.max(2, Math.min(100, Math.round((numericValue / numericTotal) * 100)));
 }
 
-function disciplineStatsByCombatant(log, participants) {
-  const stats = new Map((log.participants ?? []).map((participant) => [participant.combatantId, emptyDisciplineStats()]));
-  for (const event of log.events ?? []) {
-    if (event.ignored) continue;
-    const source = participantForEvent(event, participants);
-    const target = targetForEvent(event, participants);
-    const amount = eventAmount(event);
-    if (source?.combatantId) {
-      const row = stats.get(source.combatantId) ?? emptyDisciplineStats();
-      if (isDamageDealtEvent(event)) row.damage += amount;
-      if (isHealingEvent(event)) row.healing += amount;
-      if (isDamageDealtEvent(event) && isMartialAction(event)) row.martial += 1;
-      if (isDamageDealtEvent(event) && isRangedAction(event)) row.ranged += 1;
-      if (isDamageDealtEvent(event) && isMagicAction(event)) row.magic += 1;
-      if (isControlEvent(event)) row.control += 1;
-      stats.set(source.combatantId, row);
-    }
-    if (target?.combatantId && targetFellToZero(event)) {
-      const row = stats.get(target.combatantId) ?? emptyDisciplineStats();
-      row.downed += 1;
-      stats.set(target.combatantId, row);
-    }
-  }
-  return stats;
-}
-
-function emptyDisciplineStats() {
-  return { damage: 0, healing: 0, martial: 0, ranged: 0, magic: 0, control: 0, downed: 0 };
-}
-
-function reportReadyLog(log) {
+function sharingContext(log, playerReports) {
+  const share = log.shareSettings ?? {};
+  const mode = SHAREABLE_MODES.includes(share.shareMode) ? share.shareMode : (SHAREABLE_MODES.includes(getSetting(SETTINGS.DEFAULT_SHARE_MODE)) ? getSetting(SETTINGS.DEFAULT_SHARE_MODE) : SHARE_MODES.FULL_VISIBLE_RECAP);
   return {
-    ...log,
-    shareSettings: {
-      ...log?.shareSettings,
-      isShared: true,
-      shareMode: SHARE_MODES.FULL_VISIBLE_RECAP,
-      includePartyStats: true,
-      includeEnemyStats: true,
-      includeNpcNames: true,
-      includePrivateRolls: false,
-      includeGMNotes: false,
-      includeUnclearEvents: false,
-      includeCorrections: false,
-      anonymizeEnemies: false,
-      allowPlayersToOpenReport: true
-    }
+    isShared: Boolean(share.isShared),
+    sharingEnabled: getSetting(SETTINGS.ENABLE_PLAYER_SHARING, true) !== false,
+    statusLabel: share.isShared ? format("SCLS.Share.SharedSince", { date: formatDateTime(share.shareStartedAt ?? share.shareUpdatedAt) }) : localize("SCLS.Share.NotShared"),
+    modeOptions: SHAREABLE_MODES.map((value) => ({ value, label: localize(`SCLS.ShareMode.${value}`), selected: value === mode })),
+    anonymizeEnemies: Boolean(share.anonymizeEnemies),
+    includeEnemyStats: Boolean(share.includeEnemyStats),
+    includeHiddenCombatants: Boolean(share.includeHiddenCombatants),
+    canPost: playerReports.canShare({ ...log, shareSettings: { ...share, isShared: true, shareMode: mode } })
   };
 }
 
@@ -656,26 +868,30 @@ function reportSectionsFromForm(formData) {
 }
 
 function applyReportSettings(log, formData) {
+  const requestedMode = String(formData.get("shareMode") ?? "");
+  const now = new Date().toISOString();
+  const wasShared = Boolean(log.shareSettings?.isShared);
+  const sections = reportSectionsFromForm(formData);
   log.shareSettings = {
     ...log.shareSettings,
     isShared: true,
-    shareMode: SHARE_MODES.FULL_VISIBLE_RECAP,
+    shareMode: SHAREABLE_MODES.includes(requestedMode) ? requestedMode : SHARE_MODES.FULL_VISIBLE_RECAP,
     includePartyStats: true,
-    includeEnemyStats: true,
-    includeNpcNames: true,
-    includeHiddenCombatants: false,
+    includeEnemyStats: formData.get("includeEnemyStats") !== null,
+    anonymizeEnemies: formData.get("anonymizeEnemies") !== null,
+    includeNpcNames: formData.get("anonymizeEnemies") === null,
+    includeHiddenCombatants: formData.get("includeHiddenCombatants") !== null,
     includePrivateRolls: false,
     includeGMNotes: false,
     includeUnclearEvents: false,
-    includeDPR: formData.getAll("reportSections").includes("damageSpotlight"),
-    includeTimeline: formData.getAll("reportSections").some((value) => ["martialHighlights", "spellwork", "healingSupport", "controlPlays", "closeCalls", "heroMoments", "enemyPressure", "tacticalTurningPoints", "supportSaves"].includes(value)),
+    includeDPR: Boolean(sections.damageSpotlight),
+    includeTimeline: Object.entries(sections).some(([key, value]) => value && !["combatRecap", "partyContributions", "damageSpotlight", "aftermath"].includes(key)),
     includeCorrections: false,
-    anonymizeEnemies: false,
     allowPlayersToOpenReport: true,
-    reportSections: reportSectionsFromForm(formData),
-    shareUpdatedAt: new Date().toISOString()
+    reportSections: sections,
+    shareUpdatedAt: now
   };
-  if (log.shareSettings.isShared && !log.shareSettings.shareStartedAt) log.shareSettings.shareStartedAt = log.shareSettings.shareUpdatedAt;
+  if (!wasShared || !log.shareSettings.shareStartedAt) log.shareSettings.shareStartedAt = now;
 }
 
 function applyButtonTooltips(root) {
@@ -684,159 +900,6 @@ function applyButtonTooltips(root) {
     const title = button.dataset?.tooltip || button.getAttribute("aria-label") || button.innerText?.trim();
     if (title) button.setAttribute("title", title);
   }
-}
-
-function participantLookup(log) {
-  const byCombatantId = new Map();
-  const byActorUuid = new Map();
-  const byTokenUuid = new Map();
-  const byName = new Map();
-  for (const participant of log.participants ?? []) {
-    if (participant.combatantId) byCombatantId.set(participant.combatantId, participant);
-    if (participant.actorUuid) byActorUuid.set(participant.actorUuid, participant);
-    if (participant.tokenUuid) byTokenUuid.set(participant.tokenUuid, participant);
-    if (participant.name) byName.set(normalizeLabel(participant.name), participant);
-  }
-  return { byCombatantId, byActorUuid, byTokenUuid, byName };
-}
-
-function participantForEvent(event, participants) {
-  return participants.byCombatantId.get(event.combatantId) ?? participants.byActorUuid.get(event.actorUuid) ?? participants.byTokenUuid.get(event.tokenUuid) ?? null;
-}
-
-function targetForEvent(event, participants) {
-  return participants.byCombatantId.get(event.data?.targetCombatantId) ?? participants.byActorUuid.get(event.data?.targetActorUuid) ?? participants.byTokenUuid.get(event.data?.targetTokenUuid) ?? participants.byName.get(normalizeLabel(event.data?.targetName)) ?? null;
-}
-
-function roundAction(event, participants) {
-  const source = participantForEvent(event, participants);
-  const target = targetForEvent(event, participants);
-  const amount = eventAmount(event);
-  const actor = source?.name ?? event.data?.actorName ?? event.data?.speaker?.alias ?? "-";
-  const targetName = target?.name ?? event.data?.targetName ?? event.data?.targetNames?.join?.(", ") ?? "-";
-  const side = source?.side ?? SIDES.UNKNOWN;
-  const detail = actionDetail(event);
-  switch (event.type) {
-    case EVENT_TYPES.DAMAGE_APPLIED:
-    case EVENT_TYPES.DAMAGE_MANUAL_ADDED:
-      return actionRow(event, "damage", side, actor, targetName, amount, localize("SCLS.Protocol.Damage"), detail);
-    case EVENT_TYPES.DAMAGE_MANUAL_REDUCED:
-      return actionRow(event, "correction", side, actor, targetName, amount, localize("SCLS.Protocol.DamageReduced"), detail);
-    case EVENT_TYPES.HEALING_APPLIED:
-    case EVENT_TYPES.HEALING_MANUAL_ADDED:
-      return actionRow(event, "healing", side, actor, targetName, amount, localize("SCLS.Protocol.Healing"), detail);
-    case EVENT_TYPES.HEALING_MANUAL_REDUCED:
-      return actionRow(event, "correction", side, actor, targetName, amount, localize("SCLS.Protocol.HealingReduced"), detail);
-    case EVENT_TYPES.RESOURCE_DELTA:
-    case EVENT_TYPES.RESOURCE_DELTA_OFFLINE:
-      return resourceDeltaAction(event, source, targetName, side, actor, amount);
-    case EVENT_TYPES.ROLL_DAMAGE:
-      return actionRow(event, "roll", side, actor, targetName, amount, localize("SCLS.Protocol.DamageRoll"), detail);
-    case EVENT_TYPES.ROLL_HEALING:
-      return actionRow(event, "roll", side, actor, targetName, amount, localize("SCLS.Protocol.HealingRoll"), detail);
-    case EVENT_TYPES.ACTIVE_EFFECT_CREATED:
-      return actionRow(event, "effect", side, actor, targetName, 0, localize("SCLS.Protocol.EffectAdded"), event.data?.name ?? "");
-    case EVENT_TYPES.ACTIVE_EFFECT_DELETED:
-      return actionRow(event, "effect", side, actor, targetName, 0, localize("SCLS.Protocol.EffectRemoved"), event.data?.name ?? "");
-    default:
-      return null;
-  }
-}
-
-function resourceDeltaAction(event, source, targetName, side, actor, amount) {
-  switch (event.data?.interpretedAs) {
-    case RESOURCE_INTERPRETATIONS.DAMAGE:
-      if (!isSourceAttributedResourceDelta(event)) return actionRow(event, "taken", side, actor, actor, amount, localize("SCLS.Protocol.DamageTaken"));
-      return actionRow(event, "damage", side, actor, targetName || source?.name || "-", amount, localize("SCLS.Protocol.Damage"));
-    case RESOURCE_INTERPRETATIONS.HEALING:
-      return actionRow(event, "healing", side, actor, targetName || source?.name || "-", amount, localize("SCLS.Protocol.Healing"));
-    case RESOURCE_INTERPRETATIONS.CORRECTION_DAMAGE_UP:
-    case RESOURCE_INTERPRETATIONS.CORRECTION_DAMAGE_DOWN:
-      return actionRow(event, "correction", side, actor, targetName || source?.name || "-", amount, localize("SCLS.Protocol.DamageCorrection"));
-    case RESOURCE_INTERPRETATIONS.CORRECTION_HEALING_UP:
-    case RESOURCE_INTERPRETATIONS.CORRECTION_HEALING_DOWN:
-      return actionRow(event, "correction", side, actor, targetName || source?.name || "-", amount, localize("SCLS.Protocol.HealingCorrection"));
-    default:
-      return null;
-  }
-}
-
-function actionRow(event, kind, side, actor, target, amount, verb, detail = "") {
-  return {
-    id: event.id,
-    kind,
-    side,
-    actor,
-    target,
-    amount,
-    verb,
-    detail,
-    confidence: event.confidence,
-    time: formatDateTime(event.createdAt),
-    amountLabel: amount > 0 ? String(amount) : "-"
-  };
-}
-
-function sumRoundAmount(actions, side, kind) {
-  return actions.filter((action) => action.side === side && action.kind === kind).reduce((total, action) => total + action.amount, 0);
-}
-
-function roundSummary(heroDamage, foeDamage, healing, actionCount) {
-  const parts = [`${actionCount} ${localize("SCLS.Protocol.Actions")}`];
-  if (heroDamage) parts.push(`${localize("SCLS.Protocol.Heroes")}: ${heroDamage}`);
-  if (foeDamage) parts.push(`${localize("SCLS.Protocol.Enemies")}: ${foeDamage}`);
-  if (healing) parts.push(`${localize("SCLS.Protocol.HealingShort")}: ${healing}`);
-  return parts.join(" | ");
-}
-
-function eventAmount(event) {
-  return Math.abs(Number(event?.data?.amount ?? event?.data?.delta ?? event?.data?.total ?? 0)) || 0;
-}
-
-function actionDetail(event) {
-  return String(event?.data?.actionName ?? event?.data?.spellName ?? event?.data?.itemName ?? "").trim();
-}
-
-function isDamageEvent(event) {
-  return [EVENT_TYPES.DAMAGE_APPLIED, EVENT_TYPES.DAMAGE_MANUAL_ADDED, EVENT_TYPES.ROLL_DAMAGE].includes(event.type) || event.data?.interpretedAs === RESOURCE_INTERPRETATIONS.DAMAGE;
-}
-
-function isDamageDealtEvent(event) {
-  if ([EVENT_TYPES.DAMAGE_APPLIED, EVENT_TYPES.DAMAGE_MANUAL_ADDED].includes(event.type)) return true;
-  if ([EVENT_TYPES.RESOURCE_DELTA, EVENT_TYPES.RESOURCE_DELTA_OFFLINE].includes(event.type)) return event.data?.interpretedAs === RESOURCE_INTERPRETATIONS.DAMAGE && isSourceAttributedResourceDelta(event);
-  return false;
-}
-
-function isSourceAttributedResourceDelta(event) {
-  return event.data?.attribution === "correlatedChatRoll" || Boolean(event.data?.sourceCombatantId || event.data?.sourceActorUuid || event.data?.sourceTokenUuid);
-}
-
-function isHealingEvent(event) {
-  return [EVENT_TYPES.HEALING_APPLIED, EVENT_TYPES.HEALING_MANUAL_ADDED, EVENT_TYPES.ROLL_HEALING].includes(event.type) || event.data?.interpretedAs === RESOURCE_INTERPRETATIONS.HEALING;
-}
-
-function isControlEvent(event) {
-  if ([EVENT_TYPES.ACTIVE_EFFECT_CREATED, EVENT_TYPES.ACTIVE_EFFECT_UPDATED, EVENT_TYPES.ACTIVE_EFFECT_DELETED].includes(event.type)) return true;
-  return /control|stun|slow|prone|restrain|fear|fright|hex|pin|blind|charm|silence|web|hold|banish|bless|bane|paraly/i.test(`${actionDetail(event)} ${event?.data?.name ?? ""}`);
-}
-
-function isMagicAction(event) {
-  if (isHealingEvent(event) || isControlEvent(event)) return false;
-  return /spell|magic|fireball|bolt|shatter|cone|wave|burst|cloud|storm|spirit|sacred|radiant|necrotic|shadow|arcane|thunder|lightning|orb|missile|ray|hex|blight|guiding|burning|scorching|vitriolic|sphere|guardians/i.test(actionDetail(event));
-}
-
-function isRangedAction(event) {
-  return /bow|crossbow|shot|arrow|bolt|ray|missile|blast|throw|thrown|sling/i.test(actionDetail(event));
-}
-
-function isMartialAction(event) {
-  if (isMagicAction(event)) return false;
-  return /sword|slash|strike|dagger|scimitar|bite|claw|bash|slam|charge|lunge|cut|stab|rake|spear|pommel|shield|flourish|riposte|attack|weapon/i.test(actionDetail(event));
-}
-
-function targetFellToZero(event) {
-  const values = [event?.data?.targetHpAfter, event?.data?.targetRemainingHp, event?.data?.newValue];
-  return values.some((value) => Number(value) === 0) || Boolean(event?.data?.targetDowned);
 }
 
 function normalizeLabel(value) {
@@ -851,38 +914,4 @@ function interpretationOptions(selectedInterpretation) {
   return Object.values(RESOURCE_INTERPRETATIONS).map((value) => ({ value, label: localize(`SCLS.Interpretation.${value}`), selected: value === selectedInterpretation }));
 }
 
-function isManualAdjustmentEvent(event) {
-  return [
-    EVENT_TYPES.DAMAGE_MANUAL_ADDED,
-    EVENT_TYPES.DAMAGE_MANUAL_REDUCED,
-    EVENT_TYPES.HEALING_MANUAL_ADDED,
-    EVENT_TYPES.HEALING_MANUAL_REDUCED
-  ].includes(event.type);
-}
-
-function manualAdjustmentLabel(event) {
-  switch (event.type) {
-    case EVENT_TYPES.DAMAGE_MANUAL_ADDED: return localize("SCLS.Manual.damageAdd");
-    case EVENT_TYPES.DAMAGE_MANUAL_REDUCED: return localize("SCLS.Manual.damageReduce");
-    case EVENT_TYPES.HEALING_MANUAL_ADDED: return localize("SCLS.Manual.healingAdd");
-    case EVENT_TYPES.HEALING_MANUAL_REDUCED: return localize("SCLS.Manual.healingReduce");
-    default: return event.type;
-  }
-}
-
-function naturalEventLabel(event) {
-  const amount = event.data?.amount ?? Math.abs(event.data?.delta ?? event.data?.total ?? 0);
-  switch (event.type) {
-    case EVENT_TYPES.ROLL_DAMAGE: return `Damage roll: ${amount}`;
-    case EVENT_TYPES.ROLL_HEALING: return `Healing roll: ${amount}`;
-    case EVENT_TYPES.DAMAGE_MANUAL_ADDED: return `Manual damage added: ${amount}`;
-    case EVENT_TYPES.DAMAGE_MANUAL_REDUCED: return `Manual damage reduced: ${amount}`;
-    case EVENT_TYPES.HEALING_MANUAL_ADDED: return `Manual healing added: ${amount}`;
-    case EVENT_TYPES.HEALING_MANUAL_REDUCED: return `Manual healing reduced: ${amount}`;
-    case EVENT_TYPES.RESOURCE_DELTA: return `Resource delta ${event.data?.resourcePath}: ${event.data?.oldValue} -> ${event.data?.newValue}`;
-    case EVENT_TYPES.RESOURCE_DELTA_OFFLINE: return `Offline resource delta ${event.data?.resourcePath}: ${event.data?.oldValue} -> ${event.data?.newValue}`;
-    default: return event.type;
-  }
-}
-
-export const __test__ = { combatMetrics, combatRounds, correctionEvents, dprRows, sortedDprRows, dprColumns, participantRows, manualAdjustmentEvents, historyRows, tabNavigation, confirmDeleteCombatLog };
+export const __test__ = { combatMetrics, combatRounds, correctionEvents, dprRows, sortedDprRows, dprColumns, participantRows, manualAdjustmentEvents, historyRows, tabNavigation, confirmDeleteCombatLog, applyReportSettings, sharingContext };

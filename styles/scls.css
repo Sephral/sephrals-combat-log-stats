@@ -153,7 +153,8 @@
   white-space: nowrap;
 }
 
-.scls-tab-connector strong {
+.scls-tab-connector strong,
+.scls-tab-connector i {
   color: var(--scls-accent);
   font-size: 1rem;
 }
@@ -756,7 +757,8 @@
   gap: 0.5rem;
 }
 
-.scls-manual-adjustment {
+.scls-manual-adjustment,
+.scls-adjustment-form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 0.65rem;
@@ -768,13 +770,16 @@
   background: var(--scls-panel-strong);
 }
 
-.scls-manual-adjustment label {
+.scls-manual-adjustment label,
+.scls-adjustment-form label {
   display: grid;
   gap: 0.25rem;
 }
 
 .scls-manual-adjustment input,
-.scls-manual-adjustment select {
+.scls-manual-adjustment select,
+.scls-adjustment-form input,
+.scls-adjustment-form select {
   width: 100%;
 }
 
@@ -800,6 +805,92 @@
 .scls-window select,
 .scls-window input {
   max-width: 100%;
+}
+
+.scls-adjustment-form label span,
+.scls-share-options label > span {
+  color: var(--scls-muted);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+}
+
+.scls-adjustment-note {
+  grid-column: span 2;
+}
+
+.scls-status,
+.scls-shared-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.78rem;
+  border: 1px solid var(--scls-border);
+}
+
+.scls-status--active {
+  border-color: var(--scls-heal);
+  color: var(--scls-heal);
+}
+
+.scls-status--orphaned {
+  border-color: var(--scls-warn);
+  color: var(--scls-warn);
+}
+
+.scls-meta-line .scls-shared-badge {
+  border-color: var(--scls-accent);
+  color: var(--scls-accent);
+}
+
+.scls-cell-note {
+  display: block;
+  color: var(--scls-muted);
+  font-size: 0.74rem;
+}
+
+p.scls-share-status {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 0 0.6rem;
+  color: var(--scls-muted);
+}
+
+p.scls-share-status.is-shared {
+  color: var(--scls-heal);
+}
+
+.scls-share-options {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  gap: 0.5rem 1rem;
+  align-items: end;
+}
+
+.scls-share-options label:not(.scls-checkbox) {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.scls-share-form > .scls-share-actions {
+  grid-column: 1 / -1;
+}
+
+.scls-action--downed td {
+  color: var(--scls-danger);
+  font-weight: 600;
+}
+
+.scls-combat-tracker-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  width: calc(100% - 1rem);
+  margin: 0.35rem 0.5rem;
 }
 
 @media (max-width: 760px) {

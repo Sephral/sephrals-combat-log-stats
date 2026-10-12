@@ -96,16 +96,16 @@ export function localize(key) {
   // which already holds this module's strings for the Foundry language, English fallback and community translations.
   const language = explicitLanguage();
   const override = language ? moduleTranslations?.[language]?.[key] : undefined;
-  return override ?? game?.i18n?.localize?.(key) ?? key;
+  return override ?? globalThis.game?.i18n?.localize?.(key) ?? key;
 }
 
 export function activeLanguage() {
-  return explicitLanguage() ?? (String(game?.i18n?.lang ?? "en").toLowerCase().startsWith("de") ? LANGUAGE_MODES.DE : LANGUAGE_MODES.EN);
+  return explicitLanguage() ?? (String(globalThis.game?.i18n?.lang ?? "en").toLowerCase().startsWith("de") ? LANGUAGE_MODES.DE : LANGUAGE_MODES.EN);
 }
 
 // Locale for dates and numbers: the explicit choice, otherwise the Foundry language as is (e.g. "fr").
 export function activeLocale() {
-  return explicitLanguage() ?? String(game?.i18n?.lang || "en");
+  return explicitLanguage() ?? String(globalThis.game?.i18n?.lang || "en");
 }
 
 function explicitLanguage() {
@@ -115,7 +115,7 @@ function explicitLanguage() {
 
 function selectedLanguageMode() {
   try {
-    return game?.settings?.get(MODULE_ID, SETTINGS.LANGUAGE) ?? LANGUAGE_MODES.FOLLOW_FOUNDRY;
+    return globalThis.game?.settings?.get(MODULE_ID, SETTINGS.LANGUAGE) ?? LANGUAGE_MODES.FOLLOW_FOUNDRY;
   } catch {
     return LANGUAGE_MODES.FOLLOW_FOUNDRY;
   }
@@ -129,7 +129,6 @@ export function format(key, data = {}) {
 export function registerTemplateHelpers() {
   const handlebars = globalThis.Handlebars ?? foundry?.applications?.handlebars?.handlebars;
   handlebars?.registerHelper?.("sclsLocalize", (key) => localize(String(key ?? "")));
-  handlebars?.registerHelper?.("sclsJson", (value) => JSON.stringify(value, null, 2));
 }
 
 export async function renderAppTemplate(path, context) {
@@ -139,7 +138,15 @@ export async function renderAppTemplate(path, context) {
 }
 
 export function isGM() {
-  return Boolean(game?.user?.isGM);
+  return Boolean(globalThis.game?.user?.isGM);
+}
+
+// Only one client records combats: the active GM. A second GM or an assistant would otherwise
+// write every event a second time.
+export function isTrackingGM() {
+  if (!globalThis.game?.user?.isGM) return false;
+  const activeGM = globalThis.game?.users?.activeGM;
+  return activeGM ? activeGM.id === globalThis.game.user.id : true;
 }
 
 export function debugLog(...args) {

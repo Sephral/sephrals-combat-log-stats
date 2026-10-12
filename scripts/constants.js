@@ -22,8 +22,6 @@ export const SETTINGS = Object.freeze({
   TRACK_ROLLS: "trackRolls",
   TRACK_RESOURCE_DELTAS: "trackResourceDeltas",
   TRACK_ACTIVE_EFFECTS: "trackActiveEffects",
-  TRACK_TEMPLATES: "trackTemplates",
-  TRACK_TOKEN_UPDATES: "trackTokenUpdates",
   RESOURCE_DELTA_WINDOW_MS: "resourceDeltaWindowMs",
   INCLUDE_UNCLEAR_DELTAS_IN_STATS: "includeUnclearDeltasInStats",
   DEFAULT_DPR_METHOD: "defaultDprMethod",
