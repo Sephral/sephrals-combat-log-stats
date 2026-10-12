@@ -31,8 +31,10 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       renameLog: CombatLogApp.#onRenameLog,
       postPlayerReport: CombatLogApp.#onPostPlayerReport,
       createJournalReport: CombatLogApp.#onCreateJournalReport,
+      copyDiscordReport: CombatLogApp.#onCopyDiscordReport,
       exportJson: CombatLogApp.#onExportJson,
       exportMarkdown: CombatLogApp.#onExportMarkdown,
+      exportCsv: CombatLogApp.#onExportCsv,
       openLog: CombatLogApp.#onOpenLog,
       deleteLog: CombatLogApp.#onDeleteLog,
       sortDpr: CombatLogApp.#onSortDpr,
@@ -99,6 +101,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
   async _prepareContext(_options) {
     await this.service.flushPendingSaves?.();
     const log = await this.getLog();
+    this.renderedLog = log;
     const historyEntries = await this.service.persistence.loadHistoryEntries();
     if (!log) {
       this.activeTab = "history";
@@ -149,6 +152,18 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     for (const select of this.element.querySelectorAll("select[data-scls-action]")) {
       select.addEventListener("change", (event) => this.handleSelectChange(event));
     }
+    const shareForm = this.element.querySelector(".scls-share-form");
+    if (shareForm) {
+      shareForm.addEventListener("change", () => this.renderReportPreview(shareForm));
+      this.renderReportPreview(shareForm);
+    }
+  }
+
+  // Shows the player report for the settings in the form, saved or not. Read only, nothing is posted.
+  renderReportPreview(form) {
+    const preview = this.element?.querySelector("[data-scls-report-preview]");
+    if (!preview || !this.renderedLog || this.activeTab !== "sharing") return;
+    preview.innerHTML = reportPreviewHtml(this.playerReports, this.renderedLog, new FormData(form));
   }
 
   async saveLog(log) {
@@ -319,6 +334,19 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     } else ui.notifications?.warn(localize("SCLS.Notification.ReportNotShared"));
   }
 
+  // Uses the settings in the form without saving them. Copying does not share the combat in Foundry.
+  static async #onCopyDiscordReport(_event, target) {
+    const log = await this.getLog();
+    if (!log) return;
+    const shareSettings = reportSettingsFromForm(log, new FormData(target.closest("form")));
+    const messages = this.playerReports.discordMessages(log, { shareSettings });
+    if (messages.length > 1) {
+      await showDiscordParts(messages);
+      return;
+    }
+    if (await copyText(messages[0] ?? "")) ui.notifications?.info(localize("SCLS.Notification.DiscordCopied"));
+  }
+
   static async #onExportJson() {
     const log = await this.getLog();
     if (!log) return;
@@ -336,6 +364,66 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     this.exporter.exportMarkdown(log);
     if (record) await this.saveLog(log);
   }
+
+  static async #onExportCsv() {
+    const log = await this.getLog();
+    if (!log) return;
+    const record = this.canEdit(log, { quiet: true });
+    if (record) this.exporter.appendExportEvent(log, "csv");
+    this.exporter.exportCsv(log);
+    if (record) await this.saveLog(log);
+  }
+}
+
+// Foundry's clipboard helper falls back to execCommand where the browser blocks the Clipboard API.
+async function copyText(text) {
+  try {
+    if (typeof globalThis.game?.clipboard?.copyPlainText === "function") await globalThis.game.clipboard.copyPlainText(text);
+    else await globalThis.navigator.clipboard.writeText(text);
+    return true;
+  } catch (error) {
+    console.warn(`${MODULE_ID} | Copying to the clipboard failed`, error);
+    globalThis.ui?.notifications?.error(localize("SCLS.Notification.CopyFailed"));
+    return false;
+  }
+}
+
+// A report longer than one Discord message: every part with its own copy button, sent one after another.
+async function showDiscordParts(messages) {
+  const dialogV2 = globalThis.foundry?.applications?.api?.DialogV2;
+  if (typeof dialogV2?.wait !== "function") return null;
+  return dialogV2.wait({
+    window: { title: localize("SCLS.Discord.Title"), icon: "fa-brands fa-discord" },
+    position: { width: 560 },
+    content: discordPartsContent(messages),
+    buttons: [{ action: "close", label: localize("SCLS.Button.Close"), icon: "fa-solid fa-check", default: true }],
+    rejectClose: false,
+    render: (_event, dialog) => {
+      for (const button of dialog.element?.querySelectorAll("[data-scls-copy-part]") ?? []) {
+        button.addEventListener("click", async () => {
+          const index = Number(button.dataset.sclsCopyPart);
+          if (!await copyText(messages[index] ?? "")) return;
+          button.classList.add("is-copied");
+          globalThis.ui?.notifications?.info(format("SCLS.Notification.DiscordPartCopied", { part: index + 1, count: messages.length }));
+        });
+      }
+    }
+  });
+}
+
+function discordPartsContent(messages) {
+  const parts = messages.map((text, index) => `<div class="scls-discord-part">
+  <div class="scls-discord-part__header">
+    <strong>${escapeHtml(format("SCLS.Discord.Part", { part: index + 1, count: messages.length }))}</strong>
+    <button type="button" data-scls-copy-part="${index}"><i class="fa-solid fa-copy" aria-hidden="true"></i> ${escapeHtml(localize("SCLS.Button.Copy"))}</button>
+  </div>
+  <textarea readonly rows="6">${escapeHtml(text)}</textarea>
+</div>`);
+  return `<div class="scls-discord-parts"><p>${escapeHtml(localize("SCLS.Discord.Hint"))}</p>${parts.join("")}</div>`;
+}
+
+function reportPreviewHtml(playerReports, log, formData) {
+  return playerReports.renderHtml(playerReports.buildReport(log, { shareSettings: reportSettingsFromForm(log, formData) }));
 }
 
 async function confirmDeleteCombatLog(title = "") {
@@ -867,12 +955,11 @@ function reportSectionsFromForm(formData) {
   return Object.fromEntries(REPORT_SECTIONS.map((section) => [section.key, selected.has(section.key)]));
 }
 
-function applyReportSettings(log, formData) {
+// Share settings as the form shows them. Saving, posting, the preview and the Discord copy all read them this way.
+function reportSettingsFromForm(log, formData) {
   const requestedMode = String(formData.get("shareMode") ?? "");
-  const now = new Date().toISOString();
-  const wasShared = Boolean(log.shareSettings?.isShared);
   const sections = reportSectionsFromForm(formData);
-  log.shareSettings = {
+  return {
     ...log.shareSettings,
     isShared: true,
     shareMode: SHAREABLE_MODES.includes(requestedMode) ? requestedMode : SHARE_MODES.FULL_VISIBLE_RECAP,
@@ -888,9 +975,14 @@ function applyReportSettings(log, formData) {
     includeTimeline: Object.entries(sections).some(([key, value]) => value && !["combatRecap", "partyContributions", "damageSpotlight", "aftermath"].includes(key)),
     includeCorrections: false,
     allowPlayersToOpenReport: true,
-    reportSections: sections,
-    shareUpdatedAt: now
+    reportSections: sections
   };
+}
+
+function applyReportSettings(log, formData) {
+  const now = new Date().toISOString();
+  const wasShared = Boolean(log.shareSettings?.isShared);
+  log.shareSettings = { ...reportSettingsFromForm(log, formData), shareUpdatedAt: now };
   if (!wasShared || !log.shareSettings.shareStartedAt) log.shareSettings.shareStartedAt = now;
 }
 
@@ -914,4 +1006,7 @@ function interpretationOptions(selectedInterpretation) {
   return Object.values(RESOURCE_INTERPRETATIONS).map((value) => ({ value, label: localize(`SCLS.Interpretation.${value}`), selected: value === selectedInterpretation }));
 }
 
-export const __test__ = { combatMetrics, combatRounds, correctionEvents, dprRows, sortedDprRows, dprColumns, participantRows, manualAdjustmentEvents, historyRows, tabNavigation, confirmDeleteCombatLog, applyReportSettings, sharingContext };
+export const __test__ = {
+  combatMetrics, combatRounds, correctionEvents, dprRows, sortedDprRows, dprColumns, participantRows, manualAdjustmentEvents, historyRows, tabNavigation,
+  confirmDeleteCombatLog, applyReportSettings, reportSettingsFromForm, reportPreviewHtml, sharingContext, copyText, showDiscordParts, discordPartsContent
+};

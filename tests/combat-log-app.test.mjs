@@ -216,6 +216,142 @@ test("delete confirmation uses Foundry dialog instead of blocking browser confir
   delete globalThis.confirm;
 });
 
+function sharingLog() {
+  return {
+    id: "log-1",
+    title: "Bridge Fight",
+    participants: [
+      { combatantId: "hero", name: "Hero", side: SIDES.FRIENDLY, isPlayerOwned: true },
+      { combatantId: "gob", name: "Goblin Boss", side: SIDES.HOSTILE },
+      { combatantId: "lurker", name: "Lurker", side: SIDES.FRIENDLY, hidden: true }
+    ],
+    computed: { summary: { rounds: 1 } },
+    events: [
+      { id: "hit", type: EVENT_TYPES.DAMAGE_APPLIED, round: 1, combatantId: "hero", confidence: CONFIDENCE.SAFE, visibility: "public", data: { amount: 7, actionName: "Longsword", actionKind: "melee", targetCombatantId: "gob" } },
+      { id: "stab", type: EVENT_TYPES.DAMAGE_APPLIED, round: 1, combatantId: "lurker", confidence: CONFIDENCE.SAFE, visibility: "public", data: { amount: 3, actionName: "Dagger", actionKind: "melee", targetCombatantId: "gob" } }
+    ],
+    shareSettings: { isShared: false, anonymizeEnemies: true }
+  };
+}
+
+function sharingForm({ mode = "fullVisibleRecap", anonymize = true, hidden = false, sections = ["combatRecap", "martialHighlights"] } = {}) {
+  const form = new FormData();
+  form.set("shareMode", mode);
+  if (anonymize) form.set("anonymizeEnemies", "on");
+  if (hidden) form.set("includeHiddenCombatants", "on");
+  for (const section of sections) form.append("reportSections", section);
+  return form;
+}
+
+async function withEnglish(callback) {
+  const { readFileSync } = await import("node:fs");
+  const english = JSON.parse(readFileSync(new URL("../lang/en.json", import.meta.url), "utf8"));
+  const previous = game.i18n.localize;
+  game.i18n.localize = (key) => english[key] ?? key;
+  try {
+    return await callback();
+  } finally {
+    game.i18n.localize = previous;
+  }
+}
+
+test("report settings are read from the form without changing the log", () => {
+  const log = sharingLog();
+  const settings = __test__.reportSettingsFromForm(log, sharingForm({ anonymize: false, hidden: true }));
+
+  assert.equal(settings.shareMode, "fullVisibleRecap");
+  assert.equal(settings.anonymizeEnemies, false);
+  assert.equal(settings.includeNpcNames, true);
+  assert.equal(settings.includeHiddenCombatants, true);
+  assert.equal(settings.reportSections.martialHighlights, true);
+  assert.equal(settings.reportSections.aftermath, false);
+  assert.deepEqual(log.shareSettings, { isShared: false, anonymizeEnemies: true });
+
+  __test__.applyReportSettings(log, sharingForm());
+  assert.equal(log.shareSettings.isShared, true);
+  assert.equal(log.shareSettings.anonymizeEnemies, true);
+  assert.ok(log.shareSettings.shareStartedAt);
+  assert.equal(log.shareSettings.shareUpdatedAt, log.shareSettings.shareStartedAt);
+});
+
+test("the sharing preview renders the player report for the unsaved form settings", async () => {
+  const { PlayerReportService } = await import("../scripts/services/player-report-service.js");
+  const service = new PlayerReportService();
+  await withEnglish(() => {
+    const anonymous = __test__.reportPreviewHtml(service, sharingLog(), sharingForm());
+    assert.match(anonymous, /^<div class="scls-report">/);
+    assert.match(anonymous, /<h4>Blades and Bows<\/h4><ul><li>Round 1: Hero hit Enemy 1 with Longsword for 7 damage\.<\/li>/);
+    assert.doesNotMatch(anonymous, /Goblin Boss|Lurker|Dagger/);
+
+    const named = __test__.reportPreviewHtml(service, sharingLog(), sharingForm({ anonymize: false, hidden: true }));
+    assert.match(named, /Hero hit Goblin Boss with Longsword/);
+    assert.match(named, /Lurker hit Goblin Boss with Dagger/);
+
+    const summary = __test__.reportPreviewHtml(service, sharingLog(), sharingForm({ mode: "summaryOnly" }));
+    assert.doesNotMatch(summary, /Blades and Bows/);
+  });
+});
+
+test("a Discord report longer than one message lists every part with its own copy button", () => {
+  const html = __test__.discordPartsContent(["## One <b>", "Two & more"]);
+  assert.match(html, /^<div class="scls-discord-parts"><p>SCLS\.Discord\.Hint<\/p>/);
+  assert.equal((html.match(/data-scls-copy-part="\d"/g) ?? []).join(" "), "data-scls-copy-part=\"0\" data-scls-copy-part=\"1\"");
+  assert.match(html, /<textarea readonly rows="6">## One &lt;b&gt;<\/textarea>/);
+  assert.match(html, /<textarea readonly rows="6">Two &amp; more<\/textarea>/);
+});
+
+test("Discord parts open in a Foundry dialog whose buttons copy one part each", async () => {
+  const copied = [];
+  const listeners = [];
+  let dialogOptions = null;
+  globalThis.game.clipboard = { copyPlainText: async (text) => copied.push(text) };
+  globalThis.foundry.applications.api.DialogV2 = {
+    wait: async (options) => {
+      dialogOptions = options;
+      const buttons = [0, 1, 2].map((index) => ({ dataset: { sclsCopyPart: String(index) }, classList: { add: () => {} }, addEventListener: (type, callback) => listeners.push(callback) }));
+      options.render({}, { element: { querySelectorAll: () => buttons } });
+      return "close";
+    }
+  };
+  try {
+    await __test__.showDiscordParts(["first", "second", "third"]);
+    assert.equal(dialogOptions.window.title, "SCLS.Discord.Title");
+    assert.equal(dialogOptions.buttons.length, 1);
+    assert.equal(listeners.length, 3);
+    await listeners[1]();
+    assert.deepEqual(copied, ["second"]);
+  } finally {
+    delete globalThis.game.clipboard;
+    delete globalThis.foundry.applications.api.DialogV2;
+  }
+});
+
+test("copying uses Foundry's clipboard helper and falls back to the Clipboard API", async () => {
+  const copied = [];
+  globalThis.game.clipboard = { copyPlainText: async (text) => copied.push(`foundry:${text}`) };
+  assert.equal(await __test__.copyText("one"), true);
+  delete globalThis.game.clipboard;
+
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { clipboard: { writeText: async (text) => copied.push(`browser:${text}`) } } });
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  globalThis.ui = { notifications: { error: (message) => warnings.push(message) } };
+  try {
+    assert.equal(await __test__.copyText("two"), true);
+    Object.defineProperty(globalThis, "navigator", { configurable: true, value: { clipboard: { writeText: async () => { throw new Error("blocked"); } } } });
+    assert.equal(await __test__.copyText("three"), false);
+    assert.deepEqual(copied, ["foundry:one", "browser:two"]);
+    assert.deepEqual(warnings, ["SCLS.Notification.CopyFailed"]);
+  } finally {
+    console.warn = originalWarn;
+    delete globalThis.ui;
+    if (navigatorDescriptor) Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
+    else delete globalThis.navigator;
+  }
+});
+
 test("open combat log windows schedule a live render for matching log updates", async () => {
   let renders = 0;
   const app = new CombatLogApp({ persistence: {}, listActiveLogs: () => [] }, "current");

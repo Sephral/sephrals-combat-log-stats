@@ -78,13 +78,15 @@ export class GenericSystemAdapter {
 
   registerSystemHooks() {}
 
-  extractRollData(roll, message = null) {
+  extractRollData(roll, message = null, classification = null) {
     const targets = this.extractMessageTargets(message);
+    const type = (classification ?? this.classifyRoll(roll, message))?.type;
     return {
       ...this.describeAction(message),
       formula: String(roll?.formula ?? ""),
       total: numberOrNull(roll?.total),
       dice: Array.from(roll?.dice ?? []).map((die) => ({ faces: die.faces, results: (die.results ?? []).map((result) => result.result) })),
+      ...criticalFlags(roll, type),
       targetActorUuids: targets.actorUuids,
       targetTokenUuids: targets.tokenUuids,
       targetNames: targets.names
@@ -134,6 +136,24 @@ function rollClassNames(roll) {
     proto = Object.getPrototypeOf(proto);
   }
   return names.join(" ").toLowerCase();
+}
+
+// Attacks and other tests: a natural 20 is a critical hit, a natural 1 a fumble. Damage and healing rolls never are.
+// A system that decides itself (roll.isCritical, roll.isFumble) keeps its own answer, for example for wider critical ranges.
+function criticalFlags(roll, type) {
+  if (type === EVENT_TYPES.ROLL_DAMAGE || type === EVENT_TYPES.ROLL_HEALING) return { isCritical: false, isFumble: false };
+  if (typeof roll?.isCritical === "boolean" || typeof roll?.isFumble === "boolean") return { isCritical: roll.isCritical === true, isFumble: roll.isFumble === true };
+  const natural = naturalD20(roll);
+  return { isCritical: natural === 20, isFumble: natural === 1 };
+}
+
+// The d20 result of a roll with exactly one d20 term that keeps one die (1d20, or 2d20kh and 2d20kl for advantage and
+// disadvantage). Rerolled and dropped dice are inactive. Anything else has no single natural result.
+function naturalD20(roll) {
+  const d20Terms = Array.from(roll?.dice ?? []).filter((die) => Number(die?.faces) === 20);
+  if (d20Terms.length !== 1) return null;
+  const kept = (d20Terms[0].results ?? []).filter((result) => result && result.active !== false && !result.discarded);
+  return kept.length === 1 ? numberOrNull(kept[0].result) : null;
 }
 
 function hasDifficulty(roll) {

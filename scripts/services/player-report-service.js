@@ -78,6 +78,12 @@ const OBSERVED_SOURCE_KINDS = new Set([
 const TARGET_FALLBACK = "SCLS.Report.Fallback.Target";
 const SOMEONE_FALLBACK = "SCLS.Report.Fallback.Someone";
 
+// Discord allows up to 2,000 characters per message.
+export const DISCORD_MESSAGE_LIMIT = 2000;
+// Mark participant names in the Discord text, so they can be set in bold after the rest is escaped.
+const NAME_START = "\u0001";
+const NAME_END = "\u0002";
+
 export class PlayerReportService {
   canShare(log) {
     if (!getSetting(SETTINGS.ENABLE_PLAYER_SHARING, true)) return false;
@@ -89,7 +95,7 @@ export class PlayerReportService {
   buildReport(log, options = {}) {
     const share = { ...(log?.shareSettings ?? {}), ...(options.shareSettings ?? {}) };
     const sections = normalizeReportSections(share.reportSections);
-    const ctx = reportContext(log, share);
+    const ctx = reportContext(log, share, { markNames: Boolean(options.markNames) });
     const lines = {};
     for (const section of REPORT_SECTIONS) {
       lines[section.key] = sections[section.key] && sectionAllowed(section.key, ctx) ? SECTION_BUILDERS[section.key](ctx) : [];
@@ -104,18 +110,34 @@ export class PlayerReportService {
   }
 
   renderMarkdown(report) {
+    const sections = reportSectionEntries(report);
     const lines = [`# ${report.title}`];
-    for (const section of REPORT_SECTIONS) {
-      const entries = sectionEnabled(report, section.key) ? (report.lines?.[section.key] ?? []) : [];
-      if (!entries.length) continue;
-      lines.push("", `## ${localize(section.labelKey)}`, "", ...entries.map((entry) => `- ${entry}`));
-    }
-    if (lines.length === 1) lines.push("", localize("SCLS.Report.Empty"));
+    for (const section of sections) lines.push("", `## ${localize(section.labelKey)}`, "", ...section.entries.map((entry) => `- ${entry}`));
+    if (!sections.length) lines.push("", localize("SCLS.Report.Empty"));
     return `${lines.join("\n")}\n`;
   }
 
+  // Chat card and journal page. The module stylesheet styles .scls-report there and in the Sharing preview.
   renderHtml(report) {
-    return markdownToHtml(this.renderMarkdown(report));
+    const sections = reportSectionEntries(report);
+    const body = sections.length
+      ? sections.map((section) => `<div class="scls-report__section"><h4>${escapeHtml(localize(section.labelKey))}</h4><ul>${section.entries.map((entry) => `<li>${escapeHtml(entry)}</li>`).join("")}</ul></div>`).join("\n")
+      : `<p class="scls-report__empty">${escapeHtml(localize("SCLS.Report.Empty"))}</p>`;
+    return `<div class="scls-report">\n<h3 class="scls-report__title">${escapeHtml(report.title)}</h3>\n${body}\n</div>`;
+  }
+
+  // Discord Markdown: the title as ## heading, section names and participant names in bold, everything else escaped.
+  renderDiscordMarkdown(report) {
+    const sections = reportSectionEntries(report);
+    const blocks = [`## ${discordText(report.title)}`];
+    for (const section of sections) blocks.push([`**${discordText(localize(section.labelKey))}**`, ...section.entries.map((entry) => `- ${discordText(entry)}`)].join("\n"));
+    if (!sections.length) blocks.push(discordText(localize("SCLS.Report.Empty")));
+    return blocks.join("\n\n");
+  }
+
+  // The player report as Discord messages of at most 2,000 characters each.
+  discordMessages(log, options = {}) {
+    return splitDiscordMessage(this.renderDiscordMarkdown(this.buildReport(log, { ...options, markNames: true })));
   }
 
   appendShareEvent(log, action, data = {}) {
@@ -196,6 +218,13 @@ function sectionEnabled(report, key) {
   return normalizeReportSections(report.sections)[key] !== false;
 }
 
+// Selected sections that have something to tell, in report order.
+function reportSectionEntries(report) {
+  return REPORT_SECTIONS
+    .map((section) => ({ ...section, entries: sectionEnabled(report, section.key) ? (report.lines?.[section.key] ?? []) : [] }))
+    .filter((section) => section.entries.length);
+}
+
 function sectionAllowed(key, ctx) {
   if (key === "damageSpotlight") return ctx.mode !== SHARE_MODES.SUMMARY_ONLY;
   if (key === "enemyPressure") return ctx.includeEnemyStats;
@@ -206,9 +235,9 @@ function sectionAllowed(key, ctx) {
 // ---------------------------------------------------------------------------------------------
 // Report context: visible participants with public names and the events the share settings allow.
 
-function reportContext(log, share) {
+function reportContext(log, share, { markNames = false } = {}) {
   const mode = share.shareMode ?? SHARE_MODES.GM_ONLY;
-  const { participants, hiddenIds } = participantDirectory(log, share);
+  const { participants, hiddenIds } = participantDirectory(log, share, markNames);
   const { events, privateRollIds } = shareableEvents(log, share, hiddenIds);
   const ctx = {
     share,
@@ -227,7 +256,7 @@ function reportContext(log, share) {
   return ctx;
 }
 
-function participantDirectory(log, share) {
+function participantDirectory(log, share, markNames = false) {
   const participants = new Map();
   const hiddenIds = new Set();
   let enemyIndex = 0;
@@ -240,7 +269,7 @@ function participantDirectory(log, share) {
     }
     const side = participant.side ?? SIDES.UNKNOWN;
     const name = side === SIDES.HOSTILE ? publicEnemyName(participant, share, () => ++enemyIndex) : (participant.name || localize(SOMEONE_FALLBACK));
-    participants.set(id, { id, name, side, isPlayerOwned: Boolean(participant.isPlayerOwned) });
+    participants.set(id, { id, name: markNames ? `${NAME_START}${name}${NAME_END}` : name, side, isPlayerOwned: Boolean(participant.isPlayerOwned) });
   }
   return { participants, hiddenIds };
 }
@@ -729,14 +758,51 @@ function toNumber(value) {
   return Number(value) || 0;
 }
 
-function markdownToHtml(markdown) {
-  return markdown.split("\n").map((line) => {
-    if (line.startsWith("# ")) return `<h1>${escapeHtml(line.slice(2))}</h1>`;
-    if (line.startsWith("## ")) return `<h2>${escapeHtml(line.slice(3))}</h2>`;
-    if (line.startsWith("- ")) return `<p>&bull; ${escapeHtml(line.slice(2))}</p>`;
-    if (!line.trim()) return "";
-    return `<p>${escapeHtml(line)}</p>`;
-  }).join("\n");
+// Escapes Discord formatting characters and keeps @everyone and @here from pinging, then bolds the marked names.
+function discordText(value) {
+  return String(value ?? "")
+    .replace(/[\\*_~`|<>[\]]/g, "\\$&")
+    .replace(/@(everyone|here)/gi, "@\u200b$1")
+    .replaceAll(NAME_START, "**")
+    .replaceAll(NAME_END, "**");
 }
 
-export const __test__ = { normalizeReportSections, reportContext, participantDirectory, shareableEvents, journalOwnership, rescueIncidents, isCorrectionEvent };
+// Splits between sections first. A section longer than one message starts a new message and continues at a line
+// break. Only a single line longer than the limit is cut.
+export function splitDiscordMessage(text, limit = DISCORD_MESSAGE_LIMIT) {
+  const messages = [];
+  let current = "";
+  const flush = () => {
+    if (current) messages.push(current);
+    current = "";
+  };
+  const add = (piece, separator) => {
+    if (current && current.length + separator.length + piece.length > limit) flush();
+    current = current ? current + separator + piece : piece;
+  };
+  for (const block of String(text ?? "").split(/\n{2,}/).filter((entry) => entry.trim())) {
+    if (block.length <= limit) {
+      add(block, "\n\n");
+      continue;
+    }
+    flush();
+    for (const piece of block.split("\n").flatMap((line) => splitLongLine(line, limit))) add(piece, "\n");
+  }
+  flush();
+  return messages;
+}
+
+function splitLongLine(line, limit) {
+  const pieces = [];
+  let rest = line;
+  while (rest.length > limit) {
+    const space = rest.lastIndexOf(" ", limit);
+    const cut = space > 0 ? space : limit;
+    pieces.push(rest.slice(0, cut));
+    rest = rest.slice(cut).trimStart();
+  }
+  pieces.push(rest);
+  return pieces;
+}
+
+export const __test__ = { normalizeReportSections, reportContext, participantDirectory, shareableEvents, journalOwnership, rescueIncidents, isCorrectionEvent, discordText, splitDiscordMessage };

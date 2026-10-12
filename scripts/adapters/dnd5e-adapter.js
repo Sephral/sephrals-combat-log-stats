@@ -39,8 +39,8 @@ export class Dnd5eSystemAdapter extends GenericSystemAdapter {
     return super.classifyRoll(roll, message);
   }
 
-  extractRollData(roll, message = null) {
-    const data = super.extractRollData(roll, message);
+  extractRollData(roll, message = null, classification = null) {
+    const data = super.extractRollData(roll, message, classification);
     const action = this.describeAction(message);
     const damageType = roll?.options?.type;
     return {

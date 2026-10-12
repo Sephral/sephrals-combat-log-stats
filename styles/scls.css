@@ -879,6 +879,101 @@ p.scls-share-status.is-shared {
   grid-column: 1 / -1;
 }
 
+/* Player report in chat, in journals and in the Sharing preview. Colors derive from the surrounding text,
+   so the card reads well in light and dark chat themes. Core gives h3 and h4 the theme text color, which can
+   be light text on a light chat card, so the headings inherit instead. */
+.scls-report {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.scls-report .scls-report__title {
+  margin: 0;
+  padding: 0 0 0.25rem;
+  border-bottom: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  color: inherit;
+  font-size: var(--font-size-16, 1rem);
+  line-height: 1.25;
+}
+
+.scls-report .scls-report__section h4 {
+  margin: 0 0 0.15rem;
+  border: 0;
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--font-size-12, 0.75rem);
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.scls-report .scls-report__section ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.scls-report .scls-report__section li {
+  margin: 0.12rem 0;
+  line-height: 1.35;
+}
+
+.scls-report .scls-report__empty {
+  margin: 0;
+  font-style: italic;
+  opacity: 0.8;
+}
+
+.scls-report-preview {
+  max-width: 24rem;
+  max-height: 28rem;
+  overflow: auto;
+  margin-bottom: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--scls-border);
+  border-radius: 6px;
+  background: var(--scls-panel-strong);
+}
+
+.scls-discord-parts {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.scls-discord-parts > p {
+  margin: 0;
+}
+
+.scls-discord-part {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.scls-discord-part__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.scls-discord-part__header button {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.scls-discord-part__header button.is-copied {
+  border-color: var(--color-level-success, #65a981);
+}
+
+.scls-discord-part textarea {
+  width: 100%;
+  min-height: 7rem;
+  resize: vertical;
+  font-family: var(--font-monospace, monospace);
+  font-size: var(--font-size-12, 0.75rem);
+}
+
 .scls-action--downed td {
   color: var(--scls-danger);
   font-weight: 600;

@@ -359,13 +359,18 @@
           <button type="button" data-action="saveSharing" title="{{sclsLocalize "SCLS.Button.SaveSharing"}}"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.SaveSharing"}}</span></button>
           <button type="button" data-action="postPlayerReport" title="{{sclsLocalize "SCLS.Button.PostPlayerReport"}}" {{#unless sharing.sharingEnabled}}disabled{{/unless}}><i class="fa-solid fa-message" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.PostPlayerReport"}}</span></button>
           <button type="button" data-action="createJournalReport" title="{{sclsLocalize "SCLS.Button.CreateJournalReport"}}" {{#unless sharing.sharingEnabled}}disabled{{/unless}}><i class="fa-solid fa-book-open" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.CreateJournalReport"}}</span></button>
+          <button type="button" data-action="copyDiscordReport" title="{{sclsLocalize "SCLS.Button.CopyDiscord"}}"><i class="fa-brands fa-discord" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.CopyDiscord"}}</span></button>
           {{#if sharing.isShared}}<button type="button" class="scls-button--danger" data-action="stopSharing" title="{{sclsLocalize "SCLS.Button.StopSharing"}}"><i class="fa-solid fa-user-lock" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.StopSharing"}}</span></button>{{/if}}
         </div>
       </form>
+      <h4>{{sclsLocalize "SCLS.Share.Preview"}}</h4>
+      <p class="scls-muted">{{sclsLocalize "SCLS.Share.PreviewHint"}}</p>
+      <div class="scls-report-preview" data-scls-report-preview aria-live="polite"></div>
       <h4>{{sclsLocalize "SCLS.Label.Export"}}</h4>
       <div class="scls-share-actions">
         <button type="button" data-action="exportJson" title="{{sclsLocalize "SCLS.Button.ExportJson"}}"><i class="fa-solid fa-file-code" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.ExportJson"}}</span></button>
         <button type="button" data-action="exportMarkdown" title="{{sclsLocalize "SCLS.Button.ExportMarkdown"}}"><i class="fa-brands fa-markdown" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.ExportMarkdown"}}</span></button>
+        <button type="button" data-action="exportCsv" title="{{sclsLocalize "SCLS.Button.ExportCsv"}}"><i class="fa-solid fa-file-csv" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.ExportCsv"}}</span></button>
       </div>
     </section>
   {{/if}}

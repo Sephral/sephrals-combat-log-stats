@@ -325,7 +325,7 @@ export class CombatLogService {
         source: { kind: SOURCE_KINDS.ROLL, id: message.id },
         confidence: classification.confidence,
         data: {
-          ...this.adapter.extractRollData(roll, message),
+          ...this.adapter.extractRollData(roll, message, classification),
           targetCombatantIds: targets.map((target) => target.combatantId),
           targetActorUuids: targets.map((target) => target.actorUuid).filter(Boolean),
           targetTokenUuids: targets.map((target) => target.tokenUuid).filter(Boolean),

@@ -138,6 +138,56 @@ test("JSON export keeps the raw log", () => {
   assert.equal(downloads[0].type, "application/json");
 });
 
+function csvLog() {
+  const log = exportLog();
+  log.computed.byCombatant = [
+    { id: "aria", name: "Aria", side: SIDES.FRIENDLY, damageAppliedNet: 9, damageRolled: 11, damageTakenNet: 0, healingNet: 4, healingReceived: 4, martial: 1, ranged: 0, magic: 0, control: 1, crits: 1, fumbles: 0, downed: 0, takedowns: 1, netDPR: 4.5 },
+    { id: "gob2", name: "Goblin 2", side: SIDES.HOSTILE, damageAppliedNet: 0, damageTakenNet: 16, downed: 1, netDPR: 0 },
+    { id: "gob3", name: "", side: SIDES.HOSTILE }
+  ];
+  return log;
+}
+
+test("CSV export has one row per combatant with the main numbers", () => {
+  const csv = __test__.renderCsvExport(csvLog());
+  assert.ok(csv.startsWith("\uFEFF"), "byte order mark for Excel");
+  const lines = csv.slice(1).split("\r\n");
+  assert.equal(lines.at(-1), "");
+  assert.equal(lines[0], "Name,Side,Damage dealt (applied),Damage rolled,Damage taken,Healing done,Healing received,Melee hits,Ranged hits,Spell hits,Control effects,Critical hits,Fumbles,Times downed,Takedowns,Damage per round");
+  assert.equal(lines[1], "Aria,Friendly,9,11,0,4,4,1,0,0,1,1,0,0,1,4.5");
+  assert.equal(lines[2], "Goblin 2,Hostile,0,0,16,0,0,0,0,0,0,0,0,1,0,0");
+  // A row without a name falls back to the participant name.
+  assert.equal(lines[3], "Goblin 3,Hostile,0,0,0,0,0,0,0,0,0,0,0,0,0,0");
+  assert.equal(lines.length, 5);
+});
+
+test("CSV export quotes text cells and defuses spreadsheet formulas", () => {
+  const log = csvLog();
+  log.computed.byCombatant[0].name = "Aria, the \"Brave\"";
+  log.computed.byCombatant[1].name = "=HYPERLINK(\"http://x\")";
+  const lines = __test__.renderCsvExport(log).slice(1).split("\r\n");
+  assert.ok(lines[1].startsWith("\"Aria, the \"\"Brave\"\"\",Friendly,9,"));
+  assert.ok(lines[2].startsWith("\"'=HYPERLINK(\"\"http://x\"\")\",Hostile,"));
+  assert.equal(__test__.csvCell("-Spike"), "'-Spike");
+  assert.equal(__test__.csvCell(" padded "), "\" padded \"");
+  assert.equal(__test__.csvCell("Zoë"), "Zoë");
+});
+
+test("CSV export is localized and downloads a .csv file", () => {
+  const csv = withLanguage("de", () => __test__.renderCsvExport(csvLog()));
+  assert.match(csv, /^\uFEFFName,Seite,Ausgeteilter Schaden \(angewendet\),Gewürfelter Schaden,/);
+  assert.match(csv, /\r\nAria,Freundlich,9,/);
+
+  downloads.length = 0;
+  const log = csvLog();
+  const data = new CombatLogExportService().exportCsv(log);
+  assert.equal(downloads.length, 1);
+  assert.equal(downloads[0].filename, "combat-log-1.csv");
+  assert.equal(downloads[0].type, "text/csv");
+  assert.equal(downloads[0].data, data);
+  assert.equal(new TextEncoder().encode(data).slice(0, 3).join(","), "239,187,191");
+});
+
 test("exports are recorded as GM events", () => {
   const log = exportLog();
   new CombatLogExportService().appendExportEvent(log, "markdown");

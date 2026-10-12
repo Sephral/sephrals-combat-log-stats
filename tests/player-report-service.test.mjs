@@ -407,7 +407,7 @@ test("journal reports are readable by players and owned by the creating GM", asy
     const entry = await new PlayerReportService().createJournalReport(log);
     assert.deepEqual(entry.ownership, { default: 2, "gm-user": 3 });
     assert.equal(entry.name, "Smoke Combat");
-    assert.match(entry.pages[0].text.content, /<h2>Combat Recap<\/h2>/);
+    assert.match(entry.pages[0].text.content, /<h4>Combat Recap<\/h4>/);
     assert.equal(log.events.at(-1).type, EVENT_TYPES.SHARE_UPDATED);
 
     delete globalThis.CONST;
@@ -424,8 +424,8 @@ test("chat summaries are posted publicly as HTML", async () => {
   try {
     const message = await new PlayerReportService().postChatSummary(reportLog());
     assert.deepEqual(message.whisper, []);
-    assert.match(message.content, /^<h1>Smoke Combat<\/h1>/);
-    assert.match(message.content, /<p>&bull; Round 1: Hero hit Enemy 1 with Longsword Slash for 8 damage\.<\/p>/);
+    assert.match(message.content, /^<div class="scls-report">\n<h3 class="scls-report__title">Smoke Combat<\/h3>/);
+    assert.match(message.content, /<li>Round 1: Hero hit Enemy 1 with Longsword Slash for 8 damage\.<\/li>/);
     assert.equal(await new PlayerReportService().postChatSummary(reportLog({ isShared: false })), null);
   } finally {
     delete globalThis.ChatMessage;
@@ -457,4 +457,85 @@ test("stopping the share hides the journal reports of that combat from players",
     delete globalThis.fromUuid;
     delete globalThis.CONST;
   }
+});
+
+test("the HTML report is a styled card with a heading and a list per section", () => {
+  const service = new PlayerReportService();
+  const log = reportLog({ reportSections: { ...Object.fromEntries(Object.keys(ALL_SECTIONS).map((key) => [key, false])), combatRecap: true, controlPlays: true } });
+  log.title = "Ambush <at> the Ford";
+  const html = service.renderHtml(service.buildReport(log));
+
+  assert.match(html, /^<div class="scls-report">\n<h3 class="scls-report__title">Ambush &lt;at&gt; the Ford<\/h3>\n/);
+  assert.deepEqual(html.match(/<h4>[^<]+<\/h4>/g), ["<h4>Combat Recap</h4>", "<h4>Control Plays</h4>"]);
+  assert.match(html, /<div class="scls-report__section"><h4>Control Plays<\/h4><ul><li>Round 1: Controller afflicted Enemy 1 with Slowed\.<\/li><\/ul><\/div>/);
+  assert.match(html, /<\/div>$/);
+  assert.doesNotMatch(html, /<h1>|<h2>|&bull;/);
+
+  const empty = service.renderHtml(service.buildReport(reportLog({ reportSections: Object.fromEntries(Object.keys(ALL_SECTIONS).map((key) => [key, false])) })));
+  assert.match(empty, /<p class="scls-report__empty">No shareable combat details were recorded\.<\/p>/);
+});
+
+test("the Discord report bolds names, keeps headings at ## and contains no HTML", () => {
+  const service = new PlayerReportService();
+  const [message, ...rest] = service.discordMessages(reportLog());
+
+  assert.equal(rest.length, 0);
+  assert.match(message, /^## Smoke Combat\n\n\*\*Combat Recap\*\*\n- The party dealt 26 damage over 2 rounds\.$/m);
+  assert.match(message, /^- Round 1: \*\*Hero\*\* hit \*\*Enemy 1\*\* with Longsword Slash for 8 damage\.$/m);
+  assert.match(message, /^- \*\*Hero\*\*: 26 damage, 2 melee hits, 1 spell hit and 1 enemy defeated\.$/m);
+  assert.doesNotMatch(message, /^#(?!# )|^###|<[a-z]/m);
+  // The share settings apply exactly as in chat: anonymized enemies, no hidden combatants, no GM notes.
+  assert.doesNotMatch(message, /Secret Foe|Charmed Paladin|Hidden Lurker|Shadow Dagger|Secret plan/);
+  assert.match(service.discordMessages(reportLog({ includeNpcNames: true }))[0], /\*\*Hero\*\* hit \*\*Secret Foe\*\* with Longsword Slash/);
+});
+
+test("the Discord report escapes formatting characters and mass mentions in names and actions", () => {
+  const log = reportLog();
+  log.participants[0].name = "@everyone *Star*_Blade";
+  log.computed.dpr.byCombatant[0].name = log.participants[0].name;
+  log.events.find((event) => event.id === "slash").data.actionName = "Sword|of~Doom`";
+  const message = new PlayerReportService().discordMessages(log).join("\n");
+
+  assert.match(message, /\*\*@\u200beveryone \\\*Star\\\*\\_Blade\*\* hit \*\*Enemy 1\*\* with Sword\\\|of\\~Doom\\` for 8 damage\./);
+  assert.doesNotMatch(message, /[\u0001\u0002]/);
+  assert.doesNotMatch(message, /@everyone/);
+});
+
+test("the Discord text is split at sections and lines into messages of at most 2,000 characters", () => {
+  const { splitDiscordMessage } = __test__;
+  const section = (name, count, width = 60) => [`**${name}**`, ...Array.from({ length: count }, (_, index) => `- ${name} line ${index + 1} `.padEnd(width, "x"))].join("\n");
+  const text = ["## Title", section("A", 10), section("B", 20), section("C", 50)].join("\n\n");
+  const messages = splitDiscordMessage(text);
+
+  assert.equal(messages.length, 3);
+  for (const message of messages) assert.ok(message.length <= 2000, `${message.length}`);
+  // Sections that fit stay whole. A section longer than one message starts a new one and continues at a line break.
+  assert.equal(messages[0], ["## Title", section("A", 10), section("B", 20)].join("\n\n"));
+  assert.ok(messages[1].startsWith("**C**\n- C line 1 "));
+  assert.ok(messages[2].startsWith("- C line "));
+  for (const message of messages) for (const line of message.split("\n")) assert.ok(line === "" || /^(## |\*\*|- )/.test(line), line);
+  assert.equal(messages.join("\n").replace(/\n+/g, "\n"), text.replace(/\n+/g, "\n"));
+
+  assert.deepEqual(splitDiscordMessage("short"), ["short"]);
+  assert.deepEqual(splitDiscordMessage(""), []);
+  const long = splitDiscordMessage(`- ${"word ".repeat(700)}`.trim());
+  assert.equal(long.length, 2);
+  assert.ok(long.every((message) => message.length <= 2000));
+  assert.equal(long.join(" "), `- ${"word ".repeat(700)}`.trim());
+});
+
+test("a long player report becomes several Discord messages that keep every line", () => {
+  const log = reportLog();
+  for (let index = 0; index < 60; index += 1) {
+    log.events.push({ id: `bolt-${index}`, type: EVENT_TYPES.DAMAGE_APPLIED, round: 3, combatantId: "hero", confidence: CONFIDENCE.SAFE, visibility: VISIBILITY.PUBLIC, data: { amount: 1, actionName: `Arcane Bolt Number ${index} with a long and descriptive name`, actionKind: "spell", targetCombatantId: "foe" } });
+  }
+  log.participants.push(...Array.from({ length: 40 }, (_, index) => ({ combatantId: `ally-${index}`, name: `Allied Adventurer ${index}`, side: SIDES.FRIENDLY, isPlayerOwned: true })));
+  const service = new PlayerReportService();
+  const messages = service.discordMessages(log);
+  const single = service.renderDiscordMarkdown(service.buildReport(log, { markNames: true }));
+
+  assert.ok(single.length > 2000);
+  assert.ok(messages.length > 1);
+  for (const message of messages) assert.ok(message.length <= 2000);
+  assert.equal(messages.join("\n\n").split("\n").filter(Boolean).length, single.split("\n").filter(Boolean).length);
 });

@@ -90,7 +90,9 @@ export class CombatStatsService {
         if (own) own.ignoredEvents += 1;
         continue;
       }
-      if (event.confidence === CONFIDENCE.UNCLEAR && !includeUnclear) {
+      // The generic adapter files every attack roll as unclear. An attack roll only adds critical hits and fumbles,
+      // no hit points, so it counts without the setting for unclear hit point changes.
+      if (event.confidence === CONFIDENCE.UNCLEAR && !includeUnclear && event.type !== EVENT_TYPES.ROLL_ATTACK) {
         if (isResourceDelta(event) || String(event.type).startsWith("damage.") || String(event.type).startsWith("healing.")) {
           summary.unclassifiedDeltas += 1;
           if (target ?? own) (target ?? own).unclearEvents += 1;

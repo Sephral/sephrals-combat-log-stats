@@ -17,6 +17,12 @@ export class CombatLogExportService {
     return markdown;
   }
 
+  exportCsv(log) {
+    const csv = renderCsvExport(log);
+    downloadData(`${log.id}.csv`, csv, "text/csv");
+    return csv;
+  }
+
   appendExportEvent(log, format) {
     log.events.push({
       id: `export-${Date.now()}`,
@@ -117,10 +123,51 @@ function actionLines(events, participants) {
   return lines;
 }
 
+// Columns of the CSV export, read from the computed per combatant statistics.
+const CSV_COLUMNS = Object.freeze([
+  { labelKey: "SCLS.Export.Csv.Name", text: (row) => row.name },
+  { labelKey: "SCLS.Export.Csv.Side", text: (row) => labelFor("SCLS.Side", row.side ?? SIDES.UNKNOWN) },
+  { labelKey: "SCLS.Export.Csv.DamageDealt", key: "damageAppliedNet" },
+  { labelKey: "SCLS.Export.Csv.DamageRolled", key: "damageRolled" },
+  { labelKey: "SCLS.Export.Csv.DamageTaken", key: "damageTakenNet" },
+  { labelKey: "SCLS.Export.Csv.HealingDone", key: "healingNet" },
+  { labelKey: "SCLS.Export.Csv.HealingReceived", key: "healingReceived" },
+  { labelKey: "SCLS.Export.Csv.MeleeHits", key: "martial" },
+  { labelKey: "SCLS.Export.Csv.RangedHits", key: "ranged" },
+  { labelKey: "SCLS.Export.Csv.SpellHits", key: "magic" },
+  { labelKey: "SCLS.Export.Csv.Control", key: "control" },
+  { labelKey: "SCLS.Export.Csv.Crits", key: "crits" },
+  { labelKey: "SCLS.Export.Csv.Fumbles", key: "fumbles" },
+  { labelKey: "SCLS.Export.Csv.Downed", key: "downed" },
+  { labelKey: "SCLS.Export.Csv.Takedowns", key: "takedowns" },
+  { labelKey: "SCLS.Export.Csv.DPR", key: "netDPR" }
+]);
+
+// One row per combatant for spreadsheets: comma separated, CRLF line ends and a byte order mark, so Excel reads umlauts as UTF-8.
+function renderCsvExport(log) {
+  const participants = new Map((log?.participants ?? []).map((participant) => [String(participant?.combatantId ?? ""), participant]));
+  const rows = (log?.computed?.byCombatant ?? log?.computed?.dpr?.byCombatant ?? []).map((row) => ({
+    ...row,
+    name: row.name || participants.get(String(row.id))?.name || String(row.id ?? ""),
+    side: row.side ?? participants.get(String(row.id))?.side
+  }));
+  const lines = [
+    CSV_COLUMNS.map((column) => csvCell(localize(column.labelKey))),
+    ...rows.map((row) => CSV_COLUMNS.map((column) => (column.text ? csvCell(String(column.text(row) ?? "")) : String(Number(row[column.key]) || 0))))
+  ];
+  return `\uFEFF${lines.map((cells) => cells.join(",")).join("\r\n")}\r\n`;
+}
+
+// Quotes text cells that need it. Spreadsheets run cells starting with = + - @ as formulas, and names come from players.
+function csvCell(text) {
+  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  return /[",\r\n]/.test(safe) || safe !== safe.trim() ? `"${safe.replaceAll("\"", "\"\"")}"` : safe;
+}
+
 function labelFor(prefix, value) {
   const key = `${prefix}.${value}`;
   const label = localize(key);
   return label === key ? String(value ?? "") : label;
 }
 
-export const __test__ = { renderMarkdownExport, actionLines };
+export const __test__ = { renderMarkdownExport, actionLines, renderCsvExport, csvCell };
