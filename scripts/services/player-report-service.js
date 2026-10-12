@@ -4,6 +4,7 @@ import { activeLocale, escapeHtml, format, isoNow, localize } from "../utils.js"
 import {
   actionName,
   eventAmount,
+  isAutomaticEffect,
   isControl,
   isCritical,
   isDamageApplied,
@@ -632,7 +633,7 @@ function supportLines(ctx) {
       return roundLine(rescue.round, format(action ? "SCLS.Report.Rescue.With" : "SCLS.Report.Rescue.Plain", { source: nameOf(ctx, rescue.sourceId), target, action }));
     });
   const buffs = ctx.entries
-    .filter((entry) => entry.event.type === EVENT_TYPES.ACTIVE_EFFECT_CREATED && !isControl(entry.event) && effectName(entry.event))
+    .filter((entry) => entry.event.type === EVENT_TYPES.ACTIVE_EFFECT_CREATED && !isControl(entry.event) && !isAutomaticEffect(entry.event) && effectName(entry.event))
     .filter((entry) => isParty(ctx, entry.sourceId) && isParty(ctx, entry.targetId))
     .slice(0, 4)
     .map((entry) => roundLine(entry.round, format("SCLS.Report.Buff.Named", {

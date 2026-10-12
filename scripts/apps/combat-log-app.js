@@ -4,7 +4,7 @@ import { escapeHtml, format, formatDateTime, formatDuration, isTrackingGM, local
 import { CombatLogExportService } from "../services/export-service.js";
 import { normalizeReportSections, PlayerReportService, REPORT_SECTIONS } from "../services/player-report-service.js";
 import {
-  actionKind, actionName, eventAmount, isControl, isDamageApplied, isDamageDealt, isDowned,
+  actionKind, actionName, eventAmount, isAutomaticEffect, isControl, isDamageApplied, isDamageDealt, isDowned,
   isHealingApplied, isResourceDelta, isSourceAttributed, sourceCombatantId, targetCombatantId
 } from "../services/event-insights.js";
 
@@ -639,8 +639,10 @@ function roundActions(event, participants, appliedMessages) {
       if (appliedMessages.has(event.source?.id)) return [];
       return [actionRow(event, "roll", side, actor, target, amount, localize(event.type === EVENT_TYPES.ROLL_DAMAGE ? "SCLS.Protocol.DamageRollOpen" : "SCLS.Protocol.HealingRollOpen"), detail)];
     case EVENT_TYPES.ACTIVE_EFFECT_CREATED:
+      if (isAutomaticEffect(event)) return [];
       return [actionRow(event, isControl(event) ? "control" : "effect", side, actor, target, 0, localize(isControl(event) ? "SCLS.Protocol.ControlAdded" : "SCLS.Protocol.EffectAdded"), event.data?.name ?? "")];
     case EVENT_TYPES.ACTIVE_EFFECT_DELETED:
+      if (isAutomaticEffect(event)) return [];
       return [actionRow(event, "effect", side, "-", target, 0, localize("SCLS.Protocol.EffectRemoved"), event.data?.name ?? "")];
     default:
       return [];

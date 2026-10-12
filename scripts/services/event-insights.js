@@ -11,6 +11,13 @@ export const CONTROL_STATUSES = Object.freeze([
   "poisoned", "prone", "restrained", "stunned", "silenced", "sleeping", "unconscious", "slowed", "dazed", "cursed"
 ]);
 
+// States the system sets on its own (dnd5e: bloodied at half hit points, dead, concentrating, encumbrance).
+// They are recorded but are no action of a combatant, so the log window and the reports leave them out.
+export const AUTOMATIC_STATUSES = Object.freeze([
+  "bloodied", "dead", "defeated", "concentrating", "encumbered", "heavilyEncumbered", "exceedingCarryingCapacity"
+]);
+const LEGACY_AUTOMATIC = /^(bloodied|dead|defeated|concentrating|concentration)\b/i;
+
 export const ACTION_KINDS = Object.freeze({ MELEE: "melee", RANGED: "ranged", SPELL: "spell", OTHER: "other" });
 
 const ATTRIBUTED = new Set(["correlatedChatRoll", "systemApplied", "manualSource"]);
@@ -77,6 +84,13 @@ export function isHealingApplied(event) {
 export function isHealingGiven(event) {
   if ([EVENT_TYPES.HEALING_APPLIED, EVENT_TYPES.HEALING_MANUAL_ADDED].includes(event?.type)) return Boolean(event?.combatantId);
   return isResourceDelta(event) && event?.data?.interpretedAs === RESOURCE_INTERPRETATIONS.HEALING && isSourceAttributed(event);
+}
+
+export function isAutomaticEffect(event) {
+  if (!isEffectEvent(event)) return false;
+  const statuses = Array.isArray(event?.data?.statuses) ? event.data.statuses.map(String) : [];
+  if (statuses.length) return statuses.every((status) => AUTOMATIC_STATUSES.includes(status));
+  return LEGACY_AUTOMATIC.test(String(event?.data?.name ?? "").trim());
 }
 
 export function isControl(event) {

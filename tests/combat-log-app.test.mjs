@@ -368,3 +368,24 @@ test("open combat log windows schedule a live render for matching log updates", 
   await app.close();
   assert.equal(hookCallbacks.has(HOOKS.LOG_UPDATED), false);
 });
+
+test("the round log leaves out states the system sets on its own", () => {
+  const effect = (id, type, statuses, name, extra = {}) => ({ id, type, round: 1, combatantId: "foe", confidence: CONFIDENCE.PROBABLE, data: { name, statuses, sourceCombatantId: "hero", targetCombatantId: "foe", ...extra } });
+  const result = __test__.combatRounds({
+    participants: [
+      { combatantId: "hero", name: "Hero", side: SIDES.FRIENDLY, img: "hero.webp" },
+      { combatantId: "foe", name: "Foe", side: SIDES.HOSTILE, img: "foe.webp" }
+    ],
+    computed: { summary: { rounds: 1 } },
+    events: [
+      effect("bloodied", EVENT_TYPES.ACTIVE_EFFECT_CREATED, ["bloodied"], "Bloodied"),
+      effect("bloodied-gone", EVENT_TYPES.ACTIVE_EFFECT_DELETED, ["bloodied"], "Bloodied"),
+      effect("focus", EVENT_TYPES.ACTIVE_EFFECT_CREATED, ["concentrating"], "Concentrating: Bless"),
+      effect("old-log", EVENT_TYPES.ACTIVE_EFFECT_CREATED, undefined, "Bloodied"),
+      effect("prone", EVENT_TYPES.ACTIVE_EFFECT_CREATED, ["prone"], "Prone", { control: true }),
+      effect("bless", EVENT_TYPES.ACTIVE_EFFECT_CREATED, [], "Bless", { control: false })
+    ]
+  });
+
+  assert.deepEqual(result[0].actions.map((action) => action.detail), ["Prone", "Bless"]);
+});
