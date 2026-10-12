@@ -51,7 +51,7 @@ function registerHooks() {
   Hooks.on(HOOKS.LANGUAGE_CHANGED, applyLanguageChange);
 
   Hooks.on("createCombat", track((combat) => combatLogService.startCombat(combat)));
-  Hooks.on("combatStart", track((combat) => combatLogService.startCombat(combat)));
+  Hooks.on("combatStart", track((combat) => combatLogService.startCombat(combat, { force: true })));
   Hooks.on("updateCombat", track((combat, changed) => combatLogService.updateCombat(combat, changed)));
   // Ending a combat deletes the Combat document; core has no separate "combat ended" hook.
   Hooks.on("deleteCombat", track(async (combat) => {

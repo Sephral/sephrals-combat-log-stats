@@ -15,6 +15,10 @@ const APPLICATION_WINDOW_MS = 5000;
 // Events arrive in bursts (a roll, its chat card, the hit point update, a condition). One write per burst.
 const DEFAULT_PERSIST_DELAY_MS = 750;
 
+function isCombatStarted(combat) {
+  return Boolean(combat?.started ?? (Number(combat?.round) > 0));
+}
+
 export class CombatLogService {
   constructor({ persistDelayMs = DEFAULT_PERSIST_DELAY_MS } = {}) {
     this.persistence = new CombatLogPersistenceService();
@@ -70,10 +74,12 @@ export class CombatLogService {
     return this.persistence.loadLog(logId);
   }
 
-  async startCombat(combat) {
+  // Encounters that are only prepared get no log. combatStart passes force, it fires before round 1 is written.
+  async startCombat(combat, { force = false } = {}) {
     if (!combat || !getSetting(SETTINGS.ENABLE_AUTO_TRACKING, true)) return null;
     const existing = this.activeLogs.get(combat.id);
     if (existing) return existing;
+    if (!force && !isCombatStarted(combat)) return null;
     const log = createCombatLog(combat, this.adapter);
     this.applyDefaultShareSettings(log);
     new CombatEventLedger(log).combatStarted(combat);

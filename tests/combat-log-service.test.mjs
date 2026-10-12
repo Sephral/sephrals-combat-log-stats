@@ -42,6 +42,24 @@ test("new combat logs use configured sharing defaults without auto-sharing", asy
   assert.equal(log.shareSettings.anonymizeEnemies, false);
 });
 
+test("prepared encounters get no log until the combat starts", async () => {
+  const service = new CombatLogService();
+  service.persistence.saveLog = async (log) => log;
+  const combat = { id: "prepared", uuid: "Combat.prepared", round: 0, turn: null, started: false, combatants: [], scene: { uuid: "Scene.test", name: "Test Scene" } };
+  game.combats.contents = [combat];
+
+  assert.equal(await service.startCombat(combat), null);
+  assert.equal(await service.ensureLogForCombat(combat), null);
+  assert.equal(await service.combatantCreated({ id: "c1", combat, name: "Hero" }), null);
+  assert.equal(await service.deleteCombat(combat), null);
+  assert.equal(service.activeLogs.size, 0);
+
+  // combatStart fires before round 1 is written, so it forces the log.
+  const log = await service.startCombat(combat, { force: true });
+  assert.equal(log.combatId, "prepared");
+  assert.equal(service.activeLogs.get("prepared"), log);
+});
+
 function effectFixture() {
   const hero = { id: "hero-actor", uuid: "Actor.hero-actor", documentName: "Actor", system: { attributes: { hp: { value: 20 } } } };
   const foe = { id: "foe-actor", uuid: "Scene.test.Token.foe-token.Actor.foe-actor", documentName: "Actor", isToken: true, token: { uuid: "Scene.test.Token.foe-token" }, system: { attributes: { hp: { value: 12 } } } };

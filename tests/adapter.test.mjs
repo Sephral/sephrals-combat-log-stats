@@ -53,3 +53,19 @@ test("generic adapter extracts targeted actor uuids from chat flags", () => {
   assert.deepEqual(targets.actorUuids, ["Actor.defender"]);
   assert.deepEqual(targets.names, ["Defender"]);
 });
+
+test("generic adapter keeps test rolls without a d20 out of the damage rolls", () => {
+  class StandardCheck { constructor() { this.formula = "3d8 + 4"; this.total = 17; this.data = { dc: 15 }; } }
+  class AttackRoll extends StandardCheck {}
+  class InitiativeCheck extends StandardCheck {}
+  class DamageRoll { constructor() { this.formula = "2d6 + 3"; this.total = 10; } }
+
+  assert.equal(adapter.classifyRoll(new StandardCheck(), { flavor: "" }).type, EVENT_TYPES.ROLL_OTHER);
+  assert.equal(adapter.classifyRoll(new AttackRoll(), { flavor: "" }).type, EVENT_TYPES.ROLL_ATTACK);
+  assert.equal(adapter.classifyRoll(new InitiativeCheck(), { flavor: "" }).type, EVENT_TYPES.ROLL_OTHER);
+  assert.equal(adapter.classifyRoll(new DamageRoll(), { flavor: "" }).type, EVENT_TYPES.ROLL_DAMAGE);
+  // A plain roll with a difficulty is a test, a plain roll without any hint may still be damage.
+  assert.equal(adapter.classifyRoll({ formula: "3d8", total: 12, options: { target: 14 } }, { flavor: "" }).type, EVENT_TYPES.ROLL_OTHER);
+  assert.equal(adapter.classifyRoll({ formula: "3d8", total: 12, options: { target: null } }, { flavor: "" }).type, EVENT_TYPES.ROLL_DAMAGE);
+  assert.equal(adapter.classifyRoll({ formula: "3d8", total: 12 }, { flavor: "" }).type, EVENT_TYPES.ROLL_DAMAGE);
+});

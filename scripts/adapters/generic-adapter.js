@@ -52,7 +52,13 @@ export class GenericSystemAdapter {
   classifyRoll(roll, message) {
     const flavor = String(message?.flavor ?? message?.content ?? "").toLowerCase();
     const formula = String(roll?.formula ?? "").toLowerCase();
-    if (/initiative/.test(flavor)) return { type: EVENT_TYPES.ROLL_OTHER, confidence: CONFIDENCE.PROBABLE };
+    // Many systems name their roll classes (DamageRoll, CheckRoll, Crucible's StandardCheck and AttackRoll).
+    const rollClass = rollClassNames(roll);
+    if (/damage/.test(rollClass)) return { type: EVENT_TYPES.ROLL_DAMAGE, confidence: CONFIDENCE.PROBABLE };
+    if (/initiative/.test(rollClass) || /initiative/.test(flavor)) return { type: EVENT_TYPES.ROLL_OTHER, confidence: CONFIDENCE.PROBABLE };
+    if (/attack/.test(rollClass)) return { type: EVENT_TYPES.ROLL_ATTACK, confidence: CONFIDENCE.UNCLEAR };
+    // Tests without a d20, such as Crucible's 3d8 checks, must not count as damage.
+    if (/check|test|trait|save|skill|d20/.test(rollClass) || hasDifficulty(roll)) return { type: EVENT_TYPES.ROLL_OTHER, confidence: CONFIDENCE.UNCLEAR };
     if (/heal|healing|cure/.test(flavor)) return { type: EVENT_TYPES.ROLL_HEALING, confidence: CONFIDENCE.PROBABLE };
     if (/damage|dmg/.test(flavor)) return { type: EVENT_TYPES.ROLL_DAMAGE, confidence: CONFIDENCE.PROBABLE };
     if (/attack|hit/.test(flavor)) return { type: EVENT_TYPES.ROLL_ATTACK, confidence: CONFIDENCE.UNCLEAR };
@@ -115,6 +121,26 @@ export class GenericSystemAdapter {
     collectStructuredApplications(message?.flags ?? {}, applications);
     return dedupeApplications(applications);
   }
+}
+
+// The roll's class and its parent classes, lowercased. Plain Roll and the module's test doubles give "".
+function rollClassNames(roll) {
+  const names = [];
+  let proto = roll ? Object.getPrototypeOf(roll) : null;
+  while (proto && proto !== Object.prototype) {
+    const name = proto.constructor?.name ?? "";
+    if (!name || name === "Roll") break;
+    names.push(name);
+    proto = Object.getPrototypeOf(proto);
+  }
+  return names.join(" ").toLowerCase();
+}
+
+function hasDifficulty(roll) {
+  return [roll?.options?.dc, roll?.options?.target, roll?.data?.dc].some((value) => {
+    const number = value?.value ?? value;
+    return number !== null && number !== undefined && number !== "" && numberOrNull(number) !== null;
+  });
 }
 
 function chatApplication(type, amount, data = {}) {
