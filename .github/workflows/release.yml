@@ -81,6 +81,12 @@ jobs:
             .release/package/module.json
             .release/${{ steps.metadata.outputs.module_id }}.zip
 
+      - name: Publish release on foundryvtt.com
+        env:
+          FOUNDRY_RELEASE_TOKEN: ${{ secrets.FOUNDRY_RELEASE_TOKEN }}
+          RELEASE_TAG: ${{ steps.metadata.outputs.tag_name }}
+        run: node build/publish-foundry-release.mjs
+
       - name: Announce release on Discord
         env:
           DISCORD_WEBHOOK_MODULE: ${{ secrets.DISCORD_WEBHOOK_MODULE }}
