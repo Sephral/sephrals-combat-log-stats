@@ -14,6 +14,12 @@ Questions, feedback, and module support are welcome on [Discord](https://discord
 
 More modules by Sephral for Foundry VTT are listed on [github.com/Sephral](https://github.com/Sephral).
 
+## Demo
+
+![SCLS demo](media/demo.gif)
+
+If the embedded preview is not available in your GitHub view, please check the media folder.
+
 ## Features
 
 - Automatic combat log while a GM runs combat in the combat tracker, resumed after a reload
