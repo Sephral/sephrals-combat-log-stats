@@ -2,6 +2,7 @@
 
 **Who carried the fight? Who almost went down? Who kept the ogre on the ground for three rounds?** Combat Log & Stats records every fight while you play and turns it into numbers for you and a recap your players will love to read.
 
+[![Foundry VTT package](https://img.shields.io/badge/Foundry%20VTT-Package%20page-fe6a1f?logo=foundryvirtualtabletop&logoColor=white)](https://foundryvtt.com/packages/sephrals-combat-log-stats)
 [![Join Discord](https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white)](https://discord.gg/7BjCgDYaBP)
 [![More modules by Sephral](https://img.shields.io/badge/GitHub-More%20modules%20by%20Sephral-181717?logo=github&logoColor=white)](https://github.com/Sephral)
 
@@ -28,8 +29,7 @@ Open the window any time with the chart icon in the token controls or the button
 
 ## Install
 
-Use the manifest URL
-`https://github.com/Sephral/sephrals-combat-log-stats/releases/latest/download/module.json`
+Search for **Combat Log & Stats** in Foundry's module browser or open the [package page](https://foundryvtt.com/packages/sephrals-combat-log-stats).
 
 Foundry VTT v13 and v14 · any game system, exact attribution in D&D 5e · English and German
 
