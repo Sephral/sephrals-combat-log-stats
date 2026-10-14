@@ -128,3 +128,95 @@ test("dnd5e adapter keeps the system's critical result instead of the natural di
   assert.equal(dnd5e.extractRollData({ formula: "1d20 + 5", total: 25, dice: [d20(20)] }, message).isCritical, false);
   assert.equal(dnd5e.extractRollData({ formula: "1d20 + 5", total: 24, isCritical: true, dice: [d20(19)] }, message).isCritical, true);
 });
+
+test("generic adapter keeps d20 rolls with advantage or disadvantage out of the damage rolls", () => {
+  for (const formula of ["2d20kl + 5", "2d20kh1 + 3", "1d20 + 4"]) {
+    assert.equal(adapter.classifyRoll({ formula, total: 1 }, { flavor: "" }).type, EVENT_TYPES.ROLL_OTHER, formula);
+  }
+  assert.equal(adapter.classifyRoll({ formula: "1d4", total: 1 }, { flavor: "" }).type, EVENT_TYPES.ROLL_DAMAGE);
+});
+
+test("generic adapter reads the token of an unlinked target named by its synthetic actor", () => {
+  const targets = adapter.extractMessageTargets({ flags: { dnd5e: { targets: [{ name: "Ghost", uuid: "Scene.s1.Token.t1.Actor.a1" }, { name: "Hero", uuid: "Actor.hero" }] } } });
+  assert.deepEqual(targets.tokenUuids, ["Scene.s1.Token.t1"]);
+  assert.deepEqual(targets.actorUuids, ["Actor.hero"]);
+});
+
+test("dnd5e adapter classifies the rolls of a midi-qol item card by each roll's own type", () => {
+  const dnd5e = new Dnd5eSystemAdapter();
+  const message = { flags: { dnd5e: { messageType: "usage" }, "midi-qol": { sourceActorUuid: "Actor.hero" } } };
+  const attack = { formula: "2d20kl + 5", total: 9, options: { rollType: "attack", "midi-qol": { rollType: "attack" } } };
+  const damage = { formula: "1d8 + 3", total: 7, options: { rollType: "damage", type: "piercing", "midi-qol": { rollType: "defaultDamage" } } };
+  const bonus = { formula: "1d6", total: 4, options: { "midi-qol": { rollType: "bonusDamage" } } };
+  const healing = { formula: "1d8 + 3", total: 8, options: { rollType: "damage", type: "healing" } };
+  assert.equal(dnd5e.classifyRoll(attack, message).type, EVENT_TYPES.ROLL_ATTACK);
+  assert.equal(dnd5e.classifyRoll(damage, message).type, EVENT_TYPES.ROLL_DAMAGE);
+  assert.equal(dnd5e.classifyRoll(bonus, message).type, EVENT_TYPES.ROLL_DAMAGE);
+  assert.equal(dnd5e.classifyRoll(healing, message).type, EVENT_TYPES.ROLL_HEALING);
+});
+
+test("dnd5e adapter finds the attacker of a midi-qol application and tells an undo from an apply", async () => {
+  const { __test__ } = await import("../scripts/adapters/dnd5e-adapter.js");
+  const actor = { uuid: "Scene.s1.Token.t1.Actor.ghost" };
+  const change = (from, to, temp = [0, 0]) => ({ value: [from, to], temp });
+  const hit = (amount) => amount;
+  assert.deepEqual(__test__.midiApplication(actor, change(39, 30), {}, hit(9)), { sourceActorUuid: "", reversal: false });
+  assert.deepEqual(__test__.midiApplication(actor, change(39, 30), { midi: { sourceActorUuid: "Actor.hero" } }, hit(9)), { sourceActorUuid: "Actor.hero", reversal: false });
+  // applyTokenDamage and overtime effects name the damaged actor: no attacker. Healing oneself stays.
+  assert.deepEqual(__test__.midiApplication(actor, change(39, 30), { midi: { sourceActorUuid: actor.uuid } }, hit(9)), { sourceActorUuid: "", reversal: false });
+  assert.deepEqual(__test__.midiApplication(actor, change(30, 39), { midi: { sourceActorUuid: actor.uuid } }, -9), { sourceActorUuid: actor.uuid, reversal: false });
+
+  const older = { flags: { "midi-qol": { actorUuid: "Actor.mage", undoDamage: [{ actorUuid: actor.uuid, oldHP: 50, newHP: 45, oldTempHP: 0, newTempHP: 0 }] } } };
+  const card = { flags: { "midi-qol": { actorUuid: "Actor.hero", undoDamage: [{ actorUuid: actor.uuid, oldHP: 45, newHP: 39, oldTempHP: 0, newTempHP: 0 }] } } };
+  const shield = { flags: { "midi-qol": { actorUuid: "Actor.rogue", undoDamage: [{ actorUuid: actor.uuid, oldHP: 39, newHP: 39, oldTempHP: 5, newTempHP: 0 }] } } };
+  globalThis.game = { ...(globalThis.game ?? {}), messages: { contents: [older, card] } };
+  try {
+    // The card's buttons may pass stored options without the attacker; the undo goes from 39 back to 45.
+    assert.deepEqual(__test__.midiApplication(actor, change(39, 45), { midi: { itemType: "weapon" } }, -6), { sourceActorUuid: "Actor.hero", reversal: true });
+    assert.deepEqual(__test__.midiApplication(actor, change(39, 45), { midi: { sourceActorUuid: "Actor.hero" } }, -6), { sourceActorUuid: "Actor.hero", reversal: true });
+    // A new hit from 39 is no undo; applying the card again after an undo (45 back to 39) neither.
+    assert.deepEqual(__test__.midiApplication(actor, change(39, 30), { midi: { sourceActorUuid: "Actor.hero" } }, 9), { sourceActorUuid: "Actor.hero", reversal: false });
+    assert.deepEqual(__test__.midiApplication(actor, change(45, 39), { midi: { itemType: "weapon" } }, 6), { sourceActorUuid: "Actor.hero", reversal: false });
+    // An older card can be undone too, and names its own attacker.
+    assert.deepEqual(__test__.midiApplication(actor, change(45, 50), { midi: { itemType: "spell" } }, -5), { sourceActorUuid: "Actor.mage", reversal: true });
+    // A hit that only took temporary hit points is undone by giving them back.
+    game.messages.contents = [shield];
+    assert.deepEqual(__test__.midiApplication(actor, change(39, 39, [0, 5]), { midi: { itemType: "weapon" } }, -5), { sourceActorUuid: "Actor.rogue", reversal: true });
+  } finally {
+    delete globalThis.game.messages;
+  }
+});
+
+test("dnd5e adapter reads midi-qol's options on updates no hook announced, and skips GM copies of rolls", () => {
+  const dnd5e = new Dnd5eSystemAdapter();
+  const actor = { uuid: "Scene.s1.Token.t1.Actor.ghost" };
+  const snapshot = (value, temp = 0) => ({ system: { attributes: { hp: { value, temp } } } });
+  globalThis.game = { ...(globalThis.game ?? {}), messages: { contents: [] } };
+  try {
+    assert.equal(dnd5e.describeUpdateApplication(actor, snapshot(40), snapshot(31), {}), null);
+    const application = dnd5e.describeUpdateApplication(actor, snapshot(40), snapshot(31), { midi: { sourceActorUuid: "Actor.hero" } });
+    assert.equal(application.sourceActorUuid, "Actor.hero");
+    assert.equal(application.amount, 9);
+    assert.equal(application.reversal, false);
+  } finally {
+    delete globalThis.game.messages;
+  }
+  assert.equal(dnd5e.skipRolls({ flags: { "midi-qol": { gmHide: true } } }), true);
+  assert.equal(dnd5e.skipRolls({ flags: { "midi-qol": {} } }), false);
+  assert.equal(dnd5e.classifyRoll({ formula: "1d6", total: 3, options: { "midi-qol": { rollType: "utility" } } }, { flags: {} }).type, EVENT_TYPES.ROLL_OTHER);
+});
+
+test("dnd5e adapter recognises a re-created midi-qol card by its timestamp and speaker", () => {
+  const dnd5e = new Dnd5eSystemAdapter();
+  const first = { id: "first", timestamp: 1000, speaker: { actor: "hero", token: "t1" }, flags: { "midi-qol": {} } };
+  const other = { id: "other", timestamp: 1000, speaker: { actor: "mage", token: "t2" }, flags: { "midi-qol": {} } };
+  const copy = { id: "copy", timestamp: 1000, speaker: { actor: "hero", token: "t1" }, flags: { "midi-qol": {} } };
+  globalThis.game = { ...(globalThis.game ?? {}), messages: { contents: [first, other, copy] } };
+  try {
+    assert.equal(dnd5e.findCopiedCard(copy), "first");
+    assert.equal(dnd5e.findCopiedCard({ ...copy, timestamp: 2000 }), null);
+    assert.equal(dnd5e.findCopiedCard({ ...copy, flags: {} }), null);
+  } finally {
+    delete globalThis.game.messages;
+  }
+});

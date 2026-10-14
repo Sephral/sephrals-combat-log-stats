@@ -16,9 +16,12 @@ export class CorrelationService {
     if (!rollType) return uncorrelated("Only damage and healing are matched to rolls.");
 
     const created = new Date(deltaEvent.createdAt).getTime();
-    const used = usedRolls(log, deltaEvent);
+    const { used, appliedElsewhere } = usedRolls(log, deltaEvent);
     const groups = rollGroups(log, rollType, created, this.windowMs, deltaEvent.id)
-      .filter((group) => !used.has(group.messageId) && !used.has(group.firstEventId));
+      .filter((group) => !used.has(group.messageId) && !used.has(group.firstEventId))
+      // A roll aimed at other targets that was already applied to one of them is spent: a matching change of
+      // somebody else (a GM edit, regeneration) is a coincidence of numbers.
+      .filter((group) => !(hasTargets(group) && !isTargeted(group, deltaEvent) && (appliedElsewhere.has(group.messageId) || appliedElsewhere.has(group.firstEventId))));
     const candidates = groups
       .map((group) => ({ group, score: correlationScore(group, deltaEvent, interpretation) }))
       .filter((candidate) => candidate.score !== null);
@@ -56,20 +59,22 @@ function uncorrelated(reason) {
 // A roll explains the hit point change of a target once. A later change of the same target, such as a GM
 // edit or regeneration, must not be credited to a roll that was already applied. Temporary and regular
 // hit points that change in the same update share their roll.
+// Rolls applied to other targets are collected apart (appliedElsewhere): an area roll may still hit this target.
 function usedRolls(log, deltaEvent) {
   const used = new Set();
+  const appliedElsewhere = new Set();
   const target = targetKey(deltaEvent);
-  if (!target) return used;
+  if (!target) return { used, appliedElsewhere };
   for (const event of log?.events ?? []) {
     if (event.id === deltaEvent.id || event.type !== EVENT_TYPES.RESOURCE_DELTA || event.ignored) continue;
     if (deltaEvent.data?.updateId && event.data?.updateId === deltaEvent.data.updateId) continue;
-    if (targetKey(event) !== target) continue;
     const correlation = event.data?.correlation;
     if (!correlation || correlation.status === "ambiguous" || correlation.status === "uncorrelated") continue;
-    if (correlation.messageId) used.add(String(correlation.messageId));
-    if (correlation.rollEventId) used.add(String(correlation.rollEventId));
+    const into = targetKey(event) === target ? used : appliedElsewhere;
+    if (correlation.messageId) into.add(String(correlation.messageId));
+    if (correlation.rollEventId) into.add(String(correlation.rollEventId));
   }
-  return used;
+  return { used, appliedElsewhere };
 }
 
 function targetKey(event) {
@@ -103,13 +108,22 @@ function rollGroups(log, rollType, created, windowMs, excludeId) {
   return Array.from(groups.values());
 }
 
+function hasTargets(group) {
+  return group.targetCombatantIds.size > 0 || group.targetActorUuids.size > 0 || group.targetTokenUuids.size > 0;
+}
+
+function isTargeted(group, deltaEvent) {
+  const targetId = deltaEvent.data?.targetCombatantId || deltaEvent.combatantId || "";
+  return Boolean((targetId && group.targetCombatantIds.has(targetId))
+    || (deltaEvent.tokenUuid && group.targetTokenUuids.has(deltaEvent.tokenUuid))
+    || (deltaEvent.actorUuid && group.targetActorUuids.has(deltaEvent.actorUuid)));
+}
+
 function correlationScore(group, deltaEvent, interpretation) {
   const amount = Math.abs(Number(deltaEvent?.data?.delta ?? deltaEvent?.data?.amount ?? 0)) || 0;
   if (!amount || !group.total) return null;
   const targetId = deltaEvent.data?.targetCombatantId || deltaEvent.combatantId || "";
-  const targeted = (targetId && group.targetCombatantIds.has(targetId))
-    || (deltaEvent.tokenUuid && group.targetTokenUuids.has(deltaEvent.tokenUuid))
-    || (deltaEvent.actorUuid && group.targetActorUuids.has(deltaEvent.actorUuid));
+  const targeted = isTargeted(group, deltaEvent);
   const sameCombatant = Boolean(targetId && group.combatantId && targetId === group.combatantId);
   // Nobody damages themselves by accident; self healing is common.
   if (interpretation === RESOURCE_INTERPRETATIONS.DAMAGE && sameCombatant && !targeted) return null;

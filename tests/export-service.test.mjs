@@ -197,3 +197,55 @@ test("exports are recorded as GM events", () => {
   assert.equal(event.userId, "gm-user");
   assert.deepEqual(event.data, { format: "markdown" });
 });
+
+test("markdown export has a damage per round table", () => {
+  const log = exportLog();
+  log.computed.byRound = [{ round: 1, partyDamage: 0, enemyDamage: 4 }, { round: 2, partyDamage: 9, enemyDamage: 0 }];
+  const markdown = __test__.renderMarkdownExport(log);
+  const table = markdown.slice(markdown.indexOf("## Damage per Round"), markdown.indexOf("## Actions by Round"));
+  assert.deepEqual(table.trim().split("\n").slice(2), ["| Round | Party | Enemies |", "| ---: | ---: | ---: |", "| 1 | 0 | 4 |", "| 2 | 9 | 0 |"]);
+  // Logs saved before the table existed compute it from their events.
+  const old = __test__.renderMarkdownExport(exportLog());
+  assert.match(old, /^\| 2 \| 9 \| 0 \|$/m);
+  const quiet = { ...exportLog(), events: [] };
+  assert.doesNotMatch(__test__.renderMarkdownExport(quiet), /Damage per Round/);
+});
+
+test("Crucible exports speak of health and morale and name the state reached", () => {
+  const log = exportLog();
+  log.systemId = "crucible";
+  log.computed.summary.moraleDamageApplied = 6;
+  log.events.find((event) => event.id === "hit-confirm").data.downState = "dead";
+  log.events.push(
+    { id: "rally", type: EVENT_TYPES.RESOURCE_DELTA, round: 2, combatantId: "aria", confidence: CONFIDENCE.SAFE, ...actorUpdate, data: { resourcePath: "system.resources.morale.value", pool: "morale", interpretedAs: "healing", delta: 3, oldValue: 2, newValue: 5, targetCombatantId: "aria", actionName: "Rally" } },
+    { id: "fear", type: EVENT_TYPES.RESOURCE_DELTA, round: 2, combatantId: "aria", confidence: CONFIDENCE.SAFE, ...actorUpdate, data: { resourcePath: "system.resources.morale.value", pool: "morale", interpretedAs: "damage", delta: -6, oldValue: 6, newValue: 0, sourceCombatantId: "aria", attribution: "systemApplied", targetCombatantId: "gob2", actionName: "Taunt", downState: "broken", targetDowned: true }
+    }
+  );
+  const markdown = __test__.renderMarkdownExport(log);
+  assert.match(markdown, /^- Party members down: 0$/m);
+  assert.match(markdown, /^- Morale damage: 6$/m);
+  assert.match(markdown, /^- Unclear changes to health or morale, not counted: 1$/m);
+  assert.match(markdown, /^- Round 1: Aria regained 4 health with Potion of Healing\.$/m);
+  assert.match(markdown, /^- Round 2: Aria regained 3 morale with Rally\.$/m);
+  assert.match(markdown, /^- Round 2: Aria hit Goblin 2 with Taunt for 6 morale damage\.$/m);
+  assert.match(markdown, /^- Round 2: Goblin 2 fell\.$/m);
+  assert.match(markdown, /^- Round 2: Goblin 2 broke\.$/m);
+  assert.doesNotMatch(markdown, /HP/);
+
+  const german = withLanguage("de", () => __test__.renderMarkdownExport(log));
+  assert.match(german, /^- Runde 2: Goblin 2 verlor die Moral\.$/m);
+  assert.match(german, /^- Runde 1: Aria erhielt mit Potion of Healing 4 Gesundheit zurück\.$/m);
+});
+
+test("Crucible CSV adds morale columns, other systems keep their columns", () => {
+  const log = csvLog();
+  log.systemId = "crucible";
+  log.computed.byCombatant[0].moraleDamageDealt = 6;
+  log.computed.byCombatant[1].moraleDamageTaken = 6;
+  const lines = __test__.renderCsvExport(log).slice(1).split("\r\n");
+  assert.equal(lines[0], "Name,Side,Damage dealt (applied),Damage rolled,Damage taken,Morale damage dealt,Morale damage taken,Healing done,Healing received,Melee hits,Ranged hits,Spell hits,Control effects,Critical hits,Fumbles,Times downed,Takedowns,Damage per round");
+  assert.equal(lines[1], "Aria,Friendly,9,11,0,6,0,4,4,1,0,0,1,1,0,0,1,4.5");
+  assert.equal(lines[2], "Goblin 2,Hostile,0,0,16,0,6,0,0,0,0,0,0,0,0,1,0,0");
+  log.systemId = "dnd5e";
+  assert.equal(__test__.renderCsvExport(log).slice(1).split("\r\n")[0].split(",").length, 16);
+});

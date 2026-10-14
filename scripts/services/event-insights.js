@@ -1,4 +1,4 @@
-import { EVENT_TYPES, RESOURCE_INTERPRETATIONS } from "../constants.js";
+import { ACTION_STATUS, EVENT_TYPES, RESOURCE_INTERPRETATIONS, RESOURCE_POOLS } from "../constants.js";
 
 // Shared reading of combat log events for the stats, the log window, player reports and exports.
 // Events written since 1.0 carry structured fields (actionName, actionKind, control, targetDowned,
@@ -88,6 +88,8 @@ export function isHealingGiven(event) {
 
 export function isAutomaticEffect(event) {
   if (!isEffectEvent(event)) return false;
+  // Since 1.1 the system adapter decides when the effect is recorded (Crucible: weakened, broken, insane).
+  if (typeof event?.data?.automatic === "boolean") return event.data.automatic;
   const statuses = Array.isArray(event?.data?.statuses) ? event.data.statuses.map(String) : [];
   if (statuses.length) return statuses.every((status) => AUTOMATIC_STATUSES.includes(status));
   return LEGACY_AUTOMATIC.test(String(event?.data?.name ?? "").trim());
@@ -125,6 +127,8 @@ export function isMagic(event) {
 
 // A participant dropped from above 0 to 0 hit points.
 export function isDowned(event) {
+  // An undone action card (Crucible) takes its takedown back.
+  if (event?.data?.reversed) return false;
   if (typeof event?.data?.targetDowned === "boolean") return event.data.targetDowned;
   if (!isResourceDelta(event)) return false;
   const path = String(event?.data?.resourcePath ?? "");
@@ -143,4 +147,122 @@ export function isFumble(event) {
 // Events that change the numbers; used to decide whether the manual classification warning applies.
 export function isStatEvent(event) {
   return isResourceDelta(event) || String(event?.type ?? "").startsWith("damage.") || String(event?.type ?? "").startsWith("healing.");
+}
+
+// The pool a hit point change belongs to. Only Crucible logs know "morale" (morale and madness).
+export function resourcePool(event) {
+  return event?.data?.pool === RESOURCE_POOLS.MORALE ? RESOURCE_POOLS.MORALE : RESOURCE_POOLS.HEALTH;
+}
+
+export function isMoraleEvent(event) {
+  return resourcePool(event) === RESOURCE_POOLS.MORALE;
+}
+
+// The state a combatant reached with this event (Crucible: weakened, dead, broken, insane), "" otherwise.
+export function downState(event) {
+  return String(event?.data?.downState ?? "");
+}
+
+// A Crucible action card the GM has not confirmed (yet, or again after undoing it).
+export function isOpenAction(event) {
+  if (event?.type !== EVENT_TYPES.ACTION_USED || event.ignored) return false;
+  return [ACTION_STATUS.PENDING, ACTION_STATUS.REVERSED].includes(event?.data?.status ?? ACTION_STATUS.PENDING);
+}
+
+// Natural dice of a test as a share of the best possible result, 0 to 1. One kept d20, or a dice pool without d20
+// (Crucible's 3d8). Damage dice and rolls with several d20 results (advantage stored with both dice) have none.
+export function naturalRollShare(event) {
+  if (![EVENT_TYPES.ROLL_ATTACK, EVENT_TYPES.ROLL_CHECK, EVENT_TYPES.ROLL_SAVE].includes(event?.type)) return null;
+  const dice = Array.isArray(event?.data?.dice) ? event.data.dice : [];
+  const terms = dice.map((die) => ({ faces: Number(die?.faces) || 0, results: (die?.results ?? []).map(Number).filter(Number.isFinite) })).filter((die) => die.faces > 1 && die.results.length);
+  if (!terms.length) return null;
+  const d20 = terms.filter((die) => die.faces === 20);
+  if (d20.length) return d20.length === 1 && d20[0].results.length === 1 ? (d20[0].results[0] - 1) / 19 : null;
+  let rolled = 0;
+  let best = 0;
+  for (const die of terms) {
+    for (const result of die.results) {
+      rolled += Math.max(0, result - 1);
+      best += die.faces - 1;
+    }
+  }
+  return best ? rolled / best : null;
+}
+
+// Source and affected participant of an event. Damage or healing on oneself has no separate source.
+export function eventActors(event) {
+  const targetId = targetCombatantId(event);
+  const sourceId = sourceCombatantId(event);
+  return { sourceId: sourceId && sourceId !== targetId ? sourceId : "", targetId };
+}
+
+// Each drop to 0 HP once. A hit point change that confirms a chat application belongs to that application.
+// Crucible: a combatant that is already down in one pool (broken) and then drops in the other (dead) is one defeat.
+export function downIncidents(events) {
+  const fresh = downTracker();
+  const counted = new Set(events.filter((event) => fresh(event)));
+  return incidents(events, (event) => counted.has(event));
+}
+
+// Feed it every counted event in order; it answers true for a drop of a combatant that was not down yet.
+// A pool that rises above 0 again is back up, so a later drop counts again (dnd5e: down, healed, down again).
+export function downTracker() {
+  const down = new Map();
+  return (event) => {
+    const targetId = targetCombatantId(event) || (isResourceDelta(event) ? String(event?.combatantId ?? "") : "");
+    if (!targetId) return false;
+    const pools = down.get(targetId) ?? new Set();
+    if (isDowned(event)) {
+      const fresh = pools.size === 0;
+      pools.add(resourcePool(event));
+      down.set(targetId, pools);
+      return fresh;
+    }
+    const data = event?.data ?? {};
+    if (isResourceDelta(event) && Number(data.delta) > 0 && Number(data.newValue) > 0 && !/temp|max/i.test(String(data.resourcePath ?? ""))) pools.delete(resourcePool(event));
+    return false;
+  };
+}
+
+// Message ids of action cards the GM undid and has not confirmed again (Crucible).
+export function reversedCardMessageIds(events) {
+  return new Set((events ?? []).filter((event) => event?.type === EVENT_TYPES.ACTION_USED && !event.ignored && event.data?.status === ACTION_STATUS.REVERSED).map((event) => String(event.data?.messageId ?? "")).filter(Boolean));
+}
+
+// A hit whose card was undone, or the roll and the card of an undone action: no hit, no critical, no fumble.
+export function isUndone(event, reversedMessageIds = new Set()) {
+  if (event?.data?.reversed) return true;
+  if (!reversedMessageIds.size) return false;
+  if (event?.type === EVENT_TYPES.ACTION_USED) return reversedMessageIds.has(String(event.data?.messageId ?? ""));
+  return String(event?.type ?? "").startsWith("roll.") && reversedMessageIds.has(String(event?.source?.id ?? ""));
+}
+
+// Healing that brought a participant back from 0 HP (Crucible: from 0 health or 0 morale).
+export function rescueIncidents(events) {
+  return incidents(events, (event, original) => {
+    if (!isResourceDelta(event)) return false;
+    const { oldValue, newValue, resourcePath = "" } = event.data ?? {};
+    if (oldValue === null || oldValue === undefined || oldValue === "" || Number(oldValue) !== 0 || !(Number(newValue) > 0)) return false;
+    if (/temp|max/i.test(String(resourcePath))) return false;
+    return event.data?.interpretedAs === RESOURCE_INTERPRETATIONS.HEALING || Boolean(original && isHealingApplied(original));
+  });
+}
+
+function incidents(events, matches) {
+  const byId = new Map(events.filter((event) => event?.id).map((event) => [event.id, event]));
+  const found = new Map();
+  events.forEach((event, index) => {
+    const original = byId.get(event.data?.duplicateOfEventId) ?? null;
+    if (!matches(event, original)) return;
+    const key = original?.id ?? event.data?.duplicateOfEventId ?? event.id ?? `index-${index}`;
+    if (found.has(key)) return;
+    const primary = original ?? event;
+    const own = eventActors(primary);
+    const detected = eventActors(event);
+    const targetId = own.targetId || detected.targetId;
+    if (!targetId) return;
+    const sourceId = own.sourceId || detected.sourceId;
+    found.set(key, { event: primary, events: [primary, event], index, round: primary.round ?? event.round, targetId, sourceId: sourceId !== targetId ? sourceId : "" });
+  });
+  return Array.from(found.values());
 }

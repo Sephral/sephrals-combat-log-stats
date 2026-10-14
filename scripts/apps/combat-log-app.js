@@ -1,11 +1,15 @@
 import { CONFIDENCE, EVENT_TYPES, HOOKS, LOG_STATUS, MODULE_ID, RESOURCE_INTERPRETATIONS, SETTINGS, SHARE_MODES, SIDES, SOURCE_KINDS, TABS } from "../constants.js";
 import { getSetting } from "../settings.js";
-import { escapeHtml, format, formatDateTime, formatDuration, isTrackingGM, localize, renderAppTemplate } from "../utils.js";
+import { downloadData, escapeHtml, format, formatDateTime, formatDuration, isTrackingGM, localize, renderAppTemplate } from "../utils.js";
 import { CombatLogExportService } from "../services/export-service.js";
-import { normalizeReportSections, PlayerReportService, REPORT_SECTIONS } from "../services/player-report-service.js";
+import { formatNumber, normalizeReportSections, PlayerReportService, REPORT_SECTIONS } from "../services/player-report-service.js";
+import { awardDetail, awardLabel, computeAwards } from "../services/awards-service.js";
+import { CombatStatsService } from "../services/stats-service.js";
+import { isCrucibleLog, termKey } from "../services/system-terms.js";
+import { combatantBarChart, roundDamageChart } from "./charts.js";
 import {
-  actionKind, actionName, eventAmount, isAutomaticEffect, isControl, isDamageApplied, isDamageDealt, isDowned,
-  isHealingApplied, isResourceDelta, isSourceAttributed, sourceCombatantId, targetCombatantId
+  actionKind, actionName, downState, eventAmount, isAutomaticEffect, isControl, isDamageApplied, isDamageDealt, isDowned,
+  isHealingApplied, isMoraleEvent, isOpenAction, isResourceDelta, isSourceAttributed, sourceCombatantId, targetCombatantId
 } from "../services/event-insights.js";
 
 const DEFAULT_POSITION = { width: 1120, height: 760 };
@@ -15,7 +19,9 @@ const MANUAL_TYPES = [EVENT_TYPES.DAMAGE_MANUAL_ADDED, EVENT_TYPES.DAMAGE_MANUAL
 export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
   static DEFAULT_OPTIONS = {
     id: `${MODULE_ID}-app`,
-    classes: ["scls-window"],
+    // The window has its own dark surface. Without a fixed theme, Foundry's light theme paints headings, tabs and
+    // inputs dark on dark (core's main menu fixes its theme the same way).
+    classes: ["scls-window", "themed", "theme-dark"],
     tag: "section",
     position: DEFAULT_POSITION,
     window: {
@@ -35,6 +41,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       exportJson: CombatLogApp.#onExportJson,
       exportMarkdown: CombatLogApp.#onExportMarkdown,
       exportCsv: CombatLogApp.#onExportCsv,
+      exportDebug: CombatLogApp.#onExportDebug,
       openLog: CombatLogApp.#onOpenLog,
       deleteLog: CombatLogApp.#onDeleteLog,
       sortDpr: CombatLogApp.#onSortDpr,
@@ -135,7 +142,12 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       participantOptions,
       participants: participantRows(log),
       dprRows: sortedDprRows(log, this.dprSort),
-      dprColumns: dprColumns(this.dprSort),
+      dprColumns: dprColumns(this.dprSort, { morale: isCrucibleLog(log) }),
+      showMorale: isCrucibleLog(log),
+      charts: chartContext(log),
+      awards: awardCards(log),
+      noCorrectionsLabel: localize(termKey(log.systemId, "SCLS.Label.NoCorrections")),
+      automaticCorrectionsLabel: localize(termKey(log.systemId, "SCLS.Label.AutomaticCorrections")),
       dprMethodLabel: localize(`SCLS.DprMethod.${computed.dpr?.method ?? "appliedNet"}`),
       sideRows: sideRows(log),
       sharing: sharingContext(log, this.playerReports),
@@ -356,6 +368,15 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     if (record) await this.saveLog(log);
   }
 
+  // Raw data for bug reports: the log, the chat messages of the fight and the hook calls this client saw.
+  static async #onExportDebug() {
+    const log = await this.getLog();
+    if (!log) return;
+    const data = this.service.debugLog(log);
+    downloadData(`${log.id}-debug.json`, JSON.stringify(data, null, 2), "application/json");
+    ui.notifications?.info(localize("SCLS.Notification.DebugSaved"));
+  }
+
   static async #onExportMarkdown() {
     const log = await this.getLog();
     if (!log) return;
@@ -486,7 +507,8 @@ function summaryContext(log) {
     partyDowned: summary.partyDowned ?? 0,
     enemiesDefeated: summary.enemiesDefeated ?? 0,
     criticalHits: summary.criticalHits ?? 0,
-    warnings: warningLines(log.computed?.warningCounts ?? {})
+    moraleDamage: summary.moraleDamageApplied ?? 0,
+    warnings: warningLines(log.computed?.warningCounts ?? {}, log.systemId)
   };
 }
 
@@ -495,11 +517,13 @@ function countLabel(key, count) {
   return count === 1 ? localize(`${key}One`) : format(`${key}Other`, { count });
 }
 
-function warningLines(counts) {
+// Crucible logs speak of health and morale; open action cards only exist there.
+function warningLines(counts, systemId = "") {
   const lines = [];
-  for (const [code, key] of [["unclearExcluded", "SCLS.Warning.UnclearExcluded"], ["manualIncluded", "SCLS.Warning.ManualIncluded"]]) {
+  for (const [code, key] of [["unclearExcluded", "SCLS.Warning.UnclearExcluded"], ["manualIncluded", "SCLS.Warning.ManualIncluded"], ["openActions", "SCLS.Warning.OpenActions"], ["unknownSource", "SCLS.Warning.UnknownSource"]]) {
     const count = Number(counts[code]) || 0;
-    if (count) lines.push(countLabel(key, count));
+    if (!count) continue;
+    lines.push(count === 1 ? localize(termKey(systemId, `${key}One`)) : format(termKey(systemId, `${key}Other`), { count }));
   }
   return lines;
 }
@@ -607,6 +631,19 @@ function roundActions(event, participants, appliedMessages) {
   const amount = eventAmount(event);
   const detail = actionName(event);
   const rows = [];
+  if (isResourceDelta(event) && isMoraleEvent(event)) {
+    const targetSide = participants.byCombatantId.get(targetId)?.side ?? SIDES.UNKNOWN;
+    if (isDamageApplied(event)) {
+      if (isDamageDealt(event)) rows.push(actionRow(event, "morale", side, actor, target, amount, localize("SCLS.Protocol.MoraleDamage"), detail));
+      else rows.push(actionRow(event, "morale", targetSide, target, "-", amount, localize("SCLS.Protocol.MoraleDamage"), detail));
+    } else if (isHealingApplied(event)) {
+      rows.push(actionRow(event, "morale", side, source ? actor : "-", target, amount, localize("SCLS.Protocol.MoraleRestored"), detail));
+    } else if (isCorrectionInterpretation(event.data?.interpretedAs)) {
+      rows.push(actionRow(event, "correction", side, actor, target, amount, correctionVerb(event), detail));
+    }
+    if (isDowned(event) || downState(event)) rows.push(actionRow(event, "downed", targetSide, target, "-", 0, downVerb(event)));
+    return rows;
+  }
   if (isResourceDelta(event)) {
     if (isDamageApplied(event)) {
       if (isDamageDealt(event)) rows.push(actionRow(event, "damage", side, actor, target, amount, localize("SCLS.Protocol.Damage"), detail));
@@ -614,12 +651,18 @@ function roundActions(event, participants, appliedMessages) {
     } else if (isHealingApplied(event)) {
       rows.push(actionRow(event, "healing", side, source ? actor : "-", target, amount, localize("SCLS.Protocol.Healing"), detail));
     } else if (isCorrectionInterpretation(event.data?.interpretedAs)) {
-      rows.push(actionRow(event, "correction", side, actor, target, amount, localize(`SCLS.Interpretation.${event.data.interpretedAs}`)));
+      rows.push(actionRow(event, "correction", side, actor, target, amount, correctionVerb(event), event.data?.reversal ? detail : ""));
     }
-    if (isDowned(event)) rows.push(actionRow(event, "downed", participants.byCombatantId.get(targetId)?.side ?? SIDES.UNKNOWN, target, "-", 0, localize("SCLS.Protocol.Downed")));
+    if (isDowned(event) || downState(event)) rows.push(actionRow(event, "downed", participants.byCombatantId.get(targetId)?.side ?? SIDES.UNKNOWN, target, "-", 0, downVerb(event)));
     return rows;
   }
   switch (event.type) {
+    case EVENT_TYPES.ACTION_USED: {
+      // Crucible action cards: shown until the GM confirms them, then their changes speak for them.
+      if (!isOpenAction(event)) return [];
+      const targets = (event.data?.outcomes ?? []).map((outcome) => participantName(participants, outcome.targetCombatantId, outcome.targetName || "-")).filter((name) => name !== "-");
+      return [actionRow(event, "roll", side, actor, targets.join(", ") || "-", Number(event.data?.plannedDamage) || 0, localize("SCLS.Protocol.ActionOpen"), detail)];
+    }
     case EVENT_TYPES.DAMAGE_APPLIED:
     case EVENT_TYPES.DAMAGE_MANUAL_ADDED:
       return [actionRow(event, "damage", side, actor, target, amount, localize(event.type === EVENT_TYPES.DAMAGE_APPLIED ? "SCLS.Protocol.Damage" : "SCLS.Manual.damageAdd"), detail)];
@@ -647,6 +690,16 @@ function roundActions(event, participants, appliedMessages) {
     default:
       return [];
   }
+}
+
+function correctionVerb(event) {
+  return event.data?.reversal ? localize("SCLS.Protocol.ActionUndone") : localize(`SCLS.Interpretation.${event.data.interpretedAs}`);
+}
+
+// "Dropped to 0 HP", or the Crucible state reached (weakened, dead, broken, insane).
+function downVerb(event) {
+  const state = downState(event);
+  return state ? localize(`SCLS.Crucible.State.${state}`) : localize("SCLS.Protocol.Downed");
 }
 
 function isCorrectionInterpretation(value) {
@@ -697,17 +750,32 @@ function correctionEvents(log) {
       const sourceId = isSourceAttributed(event) ? sourceCombatantId(event) : "";
       return {
         ...event,
-        label: localize(event.type === EVENT_TYPES.RESOURCE_DELTA_OFFLINE ? "SCLS.Event.ResourceDeltaOffline" : "SCLS.Event.ResourceDelta"),
+        label: correctionLabel(event),
+        partsLabel: poolParts(event),
         roundLabel: event.round ? format("SCLS.Protocol.RoundNumber", { round: event.round }) : "-",
         targetName: participantName(participants, targetId),
         confidenceLabel: localize(`SCLS.Confidence.${event.confidence}`),
         reasonLabel: correctionReason(event),
-        interpretationOptions: interpretationOptions(event.data?.interpretedAs),
+        interpretationOptions: interpretationOptions(event.data?.interpretedAs, log.systemId),
         sourceOptions: [{ value: "", label: localize("SCLS.Label.UnknownSource"), selected: !sourceId }].concat(
           (log.participants ?? []).filter((participant) => participant.combatantId !== targetId).map((participant) => ({ value: participant.combatantId, label: participant.name, selected: participant.combatantId === sourceId }))
         )
       };
     });
+}
+
+// Crucible changes name their pool: "Health change", "Morale change".
+function correctionLabel(event) {
+  if (event.type === EVENT_TYPES.RESOURCE_DELTA_OFFLINE) return localize("SCLS.Event.ResourceDeltaOffline");
+  if (event.data?.pool) return localize(`SCLS.Crucible.Event.${isMoraleEvent(event) ? "morale" : "health"}`);
+  return localize("SCLS.Event.ResourceDelta");
+}
+
+// "Health -3, Wounds +4" for a Crucible change that spans both values of a pool.
+function poolParts(event) {
+  const parts = Object.entries(event.data?.parts ?? {}).filter(([, value]) => Number(value));
+  if (parts.length < 2) return "";
+  return parts.map(([resource, value]) => `${localize(`SCLS.Crucible.Pool.${resource}`)} ${Number(value) > 0 ? "+" : ""}${formatNumber(value)}`).join(", ");
 }
 
 function correctionReason(event) {
@@ -767,6 +835,7 @@ function dprRows(log) {
       control: Number(row.control ?? 0),
       downed: Number(row.downed ?? 0),
       takedowns: Number(row.takedowns ?? 0),
+      moraleDamageDealt: Number(row.moraleDamageDealt ?? 0),
       img: participant?.img ?? "icons/svg/mystery-man.svg",
       name: row.name || participant?.name || row.id || "-",
       sideLabel: localize(`SCLS.Side.${row.side ?? SIDES.UNKNOWN}`)
@@ -786,11 +855,13 @@ const DPR_COLUMNS = Object.freeze([
   { key: "control", labelKey: "SCLS.Label.Control", type: "number" },
   { key: "takedowns", labelKey: "SCLS.Label.Takedowns", type: "number" },
   { key: "downed", labelKey: "SCLS.Label.Downed", type: "number" },
+  { key: "moraleDamageDealt", labelKey: "SCLS.Label.MoraleDamage", type: "number", morale: true },
   { key: "netDPR", labelKey: "SCLS.Label.NetDPR", type: "number" }
 ]);
 
-function dprColumns(sort = {}) {
-  return DPR_COLUMNS.map((column) => {
+// The morale column only appears in Crucible logs.
+function dprColumns(sort = {}, { morale = false } = {}) {
+  return DPR_COLUMNS.filter((column) => morale || !column.morale).map((column) => {
     const active = sort.key === column.key;
     return {
       ...column,
@@ -816,6 +887,41 @@ function sortedDprRows(log, sort = {}) {
 function compareDprValues(left, right, type) {
   if (type === "number") return (Number(left) || 0) - (Number(right) || 0);
   return String(left ?? "").localeCompare(String(right ?? ""), String(game?.i18n?.lang ?? "en"), { sensitivity: "base", numeric: true });
+}
+
+// Statistics charts. Logs saved before 1.1 have no per round numbers, those are computed here.
+function chartContext(log) {
+  const byRound = Array.isArray(log.computed?.byRound) ? log.computed.byRound : CombatStatsService.compute(log, {
+    includeUnclearDeltasInStats: getSetting(SETTINGS.INCLUDE_UNCLEAR_DELTAS_IN_STATS, false),
+    defaultDprMethod: log.computed?.dpr?.method
+  }).byRound;
+  const roundChart = roundDamageChart(byRound, { formatValue: formatNumber });
+  const combatantChart = combatantBarChart(dprRows(log), { formatValue: formatNumber });
+  return {
+    hasCharts: Boolean(roundChart || combatantChart),
+    roundChart,
+    combatantChart,
+    roundLegend: [{ tone: "party", label: localize("SCLS.Chart.Party") }, { tone: "enemies", label: localize("SCLS.Chart.Enemies") }],
+    combatantLegend: [
+      { tone: "dealt", label: localize("SCLS.Label.DamageDealt") },
+      { tone: "taken", label: localize("SCLS.Label.DamageTaken") },
+      { tone: "healing", label: localize("SCLS.Label.Healing") }
+    ]
+  };
+}
+
+// Award cards for the Summary tab. The GM sees every party member, hidden or not.
+function awardCards(log) {
+  const members = (log.participants ?? []).filter((participant) => participant.side === SIDES.FRIENDLY && participant.combatantId)
+    .map((participant) => ({ id: String(participant.combatantId), name: participant.name || "-" }));
+  const events = (log.events ?? []).filter((event) => !event.ignored);
+  return computeAwards({ members, rows: log.computed?.byCombatant ?? log.computed?.dpr?.byCombatant ?? [], events }).map((award) => ({
+    key: award.key,
+    icon: award.icon,
+    label: awardLabel(award.key),
+    names: award.winners.map((winner) => winner.name).join(", "),
+    detail: awardDetail(award)
+  }));
 }
 
 function sideRows(log) {
@@ -887,7 +993,8 @@ function topActions(log) {
   const participants = participantLookup(log);
   const actions = new Map();
   for (const event of log.events ?? []) {
-    if (event.ignored) continue;
+    // An undone hit (Crucible) is no use of the action; the reversal takes its damage back.
+    if (event.ignored || event.data?.reversed) continue;
     const kind = isDamageDealt(event) ? "damage" : (isHealingApplied(event) && isSourceAttributed(event)) ? "healing" : isControl(event) ? "control" : null;
     if (!kind) continue;
     const name = (kind === "control" ? event.data?.name : actionName(event)) || localize(`SCLS.ActionKind.${kind}`);
@@ -974,7 +1081,7 @@ function reportSettingsFromForm(log, formData) {
     includeGMNotes: false,
     includeUnclearEvents: false,
     includeDPR: Boolean(sections.damageSpotlight),
-    includeTimeline: Object.entries(sections).some(([key, value]) => value && !["combatRecap", "partyContributions", "damageSpotlight", "aftermath"].includes(key)),
+    includeTimeline: Object.entries(sections).some(([key, value]) => value && !["combatRecap", "partyContributions", "damageSpotlight", "awards", "aftermath"].includes(key)),
     includeCorrections: false,
     allowPlayersToOpenReport: true,
     reportSections: sections
@@ -1004,11 +1111,16 @@ function sideOptions(selectedSide) {
   return Object.values(SIDES).map((value) => ({ value, label: localize(`SCLS.Side.${value}`), selected: value === selectedSide }));
 }
 
-function interpretationOptions(selectedInterpretation) {
-  return Object.values(RESOURCE_INTERPRETATIONS).map((value) => ({ value, label: localize(`SCLS.Interpretation.${value}`), selected: value === selectedInterpretation }));
+// Crucible has no temporary or maximum hit points; a change already filed that way keeps its choice.
+const HIT_POINT_ONLY_INTERPRETATIONS = new Set([RESOURCE_INTERPRETATIONS.TEMP_HP_GAIN, RESOURCE_INTERPRETATIONS.TEMP_HP_LOSS, RESOURCE_INTERPRETATIONS.MAX_HP_CHANGE]);
+
+function interpretationOptions(selectedInterpretation, systemId = "") {
+  return Object.values(RESOURCE_INTERPRETATIONS)
+    .filter((value) => !isCrucibleLog(systemId) || !HIT_POINT_ONLY_INTERPRETATIONS.has(value) || value === selectedInterpretation)
+    .map((value) => ({ value, label: localize(`SCLS.Interpretation.${value}`), selected: value === selectedInterpretation }));
 }
 
 export const __test__ = {
-  combatMetrics, combatRounds, correctionEvents, dprRows, sortedDprRows, dprColumns, participantRows, manualAdjustmentEvents, historyRows, tabNavigation,
-  confirmDeleteCombatLog, applyReportSettings, reportSettingsFromForm, reportPreviewHtml, sharingContext, copyText, showDiscordParts, discordPartsContent
+  chartContext, awardCards, warningLines, combatMetrics, combatRounds, correctionEvents, dprRows, sortedDprRows, dprColumns, participantRows, manualAdjustmentEvents, historyRows, tabNavigation,
+  confirmDeleteCombatLog, interpretationOptions, applyReportSettings, reportSettingsFromForm, reportPreviewHtml, sharingContext, copyText, showDiscordParts, discordPartsContent
 };

@@ -389,3 +389,123 @@ test("the round log leaves out states the system sets on its own", () => {
 
   assert.deepEqual(result[0].actions.map((action) => action.detail), ["Prone", "Bless"]);
 });
+
+function crucibleLog() {
+  return {
+    id: "log-c",
+    systemId: "crucible",
+    participants: [
+      { combatantId: "aria", name: "Aria", side: SIDES.FRIENDLY },
+      { combatantId: "orc", name: "Orc", side: SIDES.HOSTILE }
+    ],
+    computed: {
+      summary: { rounds: 2 },
+      byCombatant: [
+        { id: "aria", name: "Aria", side: SIDES.FRIENDLY, damageAppliedNet: 12, healingNet: 0, damageTakenNet: 3, moraleDamageDealt: 4, takedowns: 1, downed: 0 },
+        { id: "orc", name: "Orc", side: SIDES.HOSTILE, damageAppliedNet: 3, damageTakenNet: 12, downed: 1 }
+      ],
+      dpr: { method: "appliedNet" },
+      warningCounts: { openActions: 1 }
+    },
+    events: [
+      { id: "card", type: EVENT_TYPES.ACTION_USED, round: 1, combatantId: "aria", confidence: CONFIDENCE.SAFE, data: { status: "pending", actionName: "Flame Arrow", plannedDamage: 8, outcomes: [{ targetCombatantId: "orc", pools: { health: -8 } }] } },
+      { id: "done", type: EVENT_TYPES.ACTION_USED, round: 1, combatantId: "aria", confidence: CONFIDENCE.SAFE, data: { status: "confirmed", actionName: "Strike", plannedDamage: 12, outcomes: [] } },
+      { id: "hit", type: EVENT_TYPES.RESOURCE_DELTA, round: 1, combatantId: "aria", confidence: CONFIDENCE.SAFE, data: { pool: "health", resourcePath: "system.resources.health.value", interpretedAs: RESOURCE_INTERPRETATIONS.DAMAGE, delta: -12, oldValue: 12, newValue: 0, attribution: "systemApplied", sourceCombatantId: "aria", targetCombatantId: "orc", actionName: "Strike", downState: "dead", targetDowned: true } },
+      { id: "taunt", type: EVENT_TYPES.RESOURCE_DELTA, round: 2, combatantId: "aria", confidence: CONFIDENCE.SAFE, data: { pool: "morale", resourcePath: "system.resources.morale.value", interpretedAs: RESOURCE_INTERPRETATIONS.DAMAGE, delta: -4, oldValue: 8, newValue: 4, attribution: "systemApplied", sourceCombatantId: "aria", targetCombatantId: "orc", actionName: "Taunt" } },
+      { id: "undo", type: EVENT_TYPES.RESOURCE_DELTA, round: 2, combatantId: "aria", confidence: CONFIDENCE.SAFE, data: { pool: "health", resourcePath: "system.resources.health.value", interpretedAs: RESOURCE_INTERPRETATIONS.CORRECTION_DAMAGE_DOWN, reversal: true, delta: 2, oldValue: 0, newValue: 2, attribution: "systemApplied", sourceCombatantId: "aria", targetCombatantId: "orc", actionName: "Strike" } },
+      { id: "bleed", type: EVENT_TYPES.RESOURCE_DELTA, round: 2, combatantId: "aria", confidence: CONFIDENCE.PROBABLE, data: { pool: "health", resourcePath: "system.resources.health.value", interpretedAs: RESOURCE_INTERPRETATIONS.DAMAGE, delta: -7, oldValue: 3, newValue: 0, parts: { health: -3, wounds: 4 }, targetCombatantId: "aria" } }
+    ]
+  };
+}
+
+test("the Crucible round log shows open action cards, morale, states and undone cards", () => {
+  const rounds = __test__.combatRounds(crucibleLog());
+  const verbs = rounds.flatMap((round) => round.actions.map((action) => `${action.verb}|${action.actor}|${action.target}|${action.amountLabel}`));
+  assert.ok(verbs.includes("SCLS.Protocol.ActionOpen|Aria|Orc|8"), verbs.join("\n"));
+  assert.ok(!verbs.some((verb) => verb.includes("|Aria|-|12") && verb.startsWith("SCLS.Protocol.ActionOpen")));
+  assert.ok(verbs.includes("SCLS.Crucible.State.dead|Orc|-|-"));
+  assert.ok(verbs.includes("SCLS.Protocol.MoraleDamage|Aria|Orc|4"));
+  assert.ok(verbs.includes("SCLS.Protocol.ActionUndone|Aria|Orc|2"));
+  const round2 = rounds.find((round) => round.round === 2);
+  // Morale damage is not added to the party's damage of the round.
+  assert.equal(round2.heroDamage, 0);
+  assert.equal(round2.actions.find((action) => action.verb === "SCLS.Protocol.MoraleDamage").kind, "morale");
+});
+
+test("Crucible corrections name the pool and its parts", () => {
+  const [bleed] = __test__.correctionEvents(crucibleLog());
+  assert.equal(bleed.id, "bleed");
+  assert.equal(bleed.label, "SCLS.Crucible.Event.health");
+  assert.equal(bleed.partsLabel, "SCLS.Crucible.Pool.health -3, SCLS.Crucible.Pool.wounds +4");
+});
+
+test("warnings use Crucible wording and report open action cards", () => {
+  assert.deepEqual(__test__.warningLines({ openActions: 2, unclearExcluded: 1 }, "crucible"), ["SCLS.Crucible.Warning.UnclearExcludedOne", "SCLS.Warning.OpenActionsOther"]);
+  assert.deepEqual(__test__.warningLines({ unclearExcluded: 1 }, "dnd5e"), ["SCLS.Warning.UnclearExcludedOne"]);
+});
+
+test("the morale column appears in Crucible logs only", () => {
+  assert.ok(__test__.dprColumns({}, { morale: true }).some((column) => column.key === "moraleDamageDealt"));
+  assert.ok(!__test__.dprColumns({}).some((column) => column.key === "moraleDamageDealt"));
+  assert.equal(__test__.dprRows(crucibleLog())[0].moraleDamageDealt, 4);
+});
+
+test("the statistics charts use stored or computed round numbers", () => {
+  const log = crucibleLog();
+  const charts = __test__.chartContext(log);
+  // No byRound stored: computed from the events (12 in round 1, 2 undone in round 2).
+  assert.equal(charts.hasCharts, true);
+  assert.match(charts.roundChart, /<svg class="scls-chart__svg"/);
+  assert.match(charts.combatantChart, /Aria/);
+  assert.equal(charts.roundLegend.length, 2);
+  assert.equal(charts.combatantLegend.length, 3);
+  const empty = __test__.chartContext({ participants: [], events: [], computed: { byRound: [], byCombatant: [] } });
+  assert.equal(empty.hasCharts, false);
+});
+
+test("award cards list party members only", () => {
+  const cards = __test__.awardCards(crucibleLog());
+  const mvp = cards.find((card) => card.key === "mvp");
+  assert.equal(mvp.names, "Aria");
+  assert.equal(mvp.label, "SCLS.Award.Label.mvp");
+  assert.equal(mvp.icon, "fa-solid fa-crown");
+  assert.ok(cards.every((card) => card.names !== "Orc"));
+});
+
+test("every key in the window template exists in both languages", async () => {
+  const { readFileSync } = await import("node:fs");
+  const template = readFileSync(new URL("../templates/combat-log-app.hbs", import.meta.url), "utf8");
+  const keys = Array.from(template.matchAll(/sclsLocalize "([^"]+)"/g), (match) => match[1]);
+  for (const language of ["en", "de"]) {
+    const strings = JSON.parse(readFileSync(new URL(`../lang/${language}.json`, import.meta.url), "utf8"));
+    for (const key of keys) assert.ok(key in strings, `${language}: ${key}`);
+  }
+});
+
+test("Crucible and award keys exist in both languages and follow the text rules", async () => {
+  const { readFileSync } = await import("node:fs");
+  const languages = Object.fromEntries(["en", "de"].map((language) => [language, JSON.parse(readFileSync(new URL(`../lang/${language}.json`, import.meta.url), "utf8"))]));
+  const own = (language) => Object.keys(languages[language]).filter((key) => /^SCLS\.(Crucible|Award|Chart)\./.test(key)).sort();
+  assert.deepEqual(own("de"), own("en"));
+  const { SYSTEM_TERM_KEYS } = await import("../scripts/services/system-terms.js");
+  for (const key of SYSTEM_TERM_KEYS.crucible) assert.ok(key.replace(/^SCLS\./, "SCLS.Crucible.") in languages.en, key);
+  for (const language of ["en", "de"]) {
+    for (const key of own(language)) {
+      const value = languages[language][key];
+      assert.doesNotMatch(value, /;|\s[-–—]\s|[–—]|\bHP\b|\bTP\b/, `${language}: ${key}`);
+    }
+  }
+});
+
+test("Crucible corrections offer no temporary or maximum hit point choices and use Crucible wording", async () => {
+  const dnd = __test__.interpretationOptions("damage", "dnd5e").map((option) => option.value);
+  const crucible = __test__.interpretationOptions("damage", "crucible").map((option) => option.value);
+  assert.ok(dnd.includes(RESOURCE_INTERPRETATIONS.TEMP_HP_GAIN) && dnd.includes(RESOURCE_INTERPRETATIONS.MAX_HP_CHANGE));
+  assert.ok(!crucible.some((value) => [RESOURCE_INTERPRETATIONS.TEMP_HP_GAIN, RESOURCE_INTERPRETATIONS.TEMP_HP_LOSS, RESOURCE_INTERPRETATIONS.MAX_HP_CHANGE].includes(value)));
+  assert.ok(crucible.includes(RESOURCE_INTERPRETATIONS.DAMAGE) && crucible.includes(RESOURCE_INTERPRETATIONS.IGNORED));
+  // A change filed that way earlier keeps its choice.
+  assert.ok(__test__.interpretationOptions(RESOURCE_INTERPRETATIONS.MAX_HP_CHANGE, "crucible").some((option) => option.selected && option.value === RESOURCE_INTERPRETATIONS.MAX_HP_CHANGE));
+  const { termKey } = await import("../scripts/services/system-terms.js");
+  assert.equal(termKey("crucible", "SCLS.Label.AutomaticCorrections"), "SCLS.Crucible.Label.AutomaticCorrections");
+  assert.equal(termKey("dnd5e", "SCLS.Label.AutomaticCorrections"), "SCLS.Label.AutomaticCorrections");
+});

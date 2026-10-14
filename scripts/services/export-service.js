@@ -1,7 +1,9 @@
 import { EVENT_TYPES, SIDES, SOURCE_KINDS } from "../constants.js";
 import { downloadData, format, formatDateTime, localize } from "../utils.js";
-import { actionName, eventAmount, isControl, isDamageApplied, isDowned, isHealingApplied } from "./event-insights.js";
+import { actionName, downState, eventAmount, isControl, isDamageApplied, isDowned, isHealingApplied, isMoraleEvent } from "./event-insights.js";
 import { controlSentence, damageSentence, downIncidents, downSentence, eventActors, formatNumber, healingSentence, roundLine } from "./player-report-service.js";
+import { CombatStatsService } from "./stats-service.js";
+import { isCrucibleLog, termKey } from "./system-terms.js";
 
 export class CombatLogExportService {
   exportJson(log) {
@@ -54,6 +56,7 @@ function renderMarkdownExport(log) {
   const downs = downIncidents(events);
   const sideOf = (id) => participants.get(id)?.side ?? SIDES.UNKNOWN;
   const startedAt = formatDateTime(log?.startedAt);
+  const system = String(log?.systemId ?? "");
 
   const lines = [
     `# ${log?.title || localize("SCLS.Export.DefaultTitle")}`,
@@ -82,19 +85,33 @@ function renderMarkdownExport(log) {
     `- ${format("SCLS.Export.PartyDPR", { value: formatNumber(stats?.dpr?.partyDPR) })}`,
     `- ${format("SCLS.Export.EnemyDPR", { value: formatNumber(stats?.dpr?.enemyDPR) })}`,
     `- ${format("SCLS.Export.Defeated", { value: formatNumber(new Set(downs.filter((down) => sideOf(down.targetId) === SIDES.HOSTILE).map((down) => down.targetId)).size) })}`,
-    `- ${format("SCLS.Export.PartyDown", { value: formatNumber(downs.filter((down) => sideOf(down.targetId) === SIDES.FRIENDLY).length) })}`
+    `- ${format(termKey(system, "SCLS.Export.PartyDown"), { value: formatNumber(downs.filter((down) => sideOf(down.targetId) === SIDES.FRIENDLY).length) })}`
   );
-  if (unclear > 0) lines.push(`- ${format("SCLS.Export.Unclear", { value: formatNumber(unclear) })}`);
+  if (isCrucibleLog(system)) lines.push(`- ${format("SCLS.Export.MoraleDamage", { value: formatNumber(stats?.summary?.moraleDamageApplied) })}`);
+  if (unclear > 0) lines.push(`- ${format(termKey(system, "SCLS.Export.Unclear"), { value: formatNumber(unclear) })}`);
 
-  const actions = actionLines(events, participants);
+  const rounds = roundRows(log);
+  if (rounds.length) {
+    lines.push("", `## ${localize("SCLS.Export.RoundsHeading")}`, "", localize("SCLS.Export.RoundsTable"), "| ---: | ---: | ---: |");
+    for (const row of rounds) lines.push(`| ${formatNumber(row.round)} | ${formatNumber(row.partyDamage)} | ${formatNumber(row.enemyDamage)} |`);
+  }
+
+  const actions = actionLines(events, participants, system);
   lines.push("", `## ${localize("SCLS.Export.ActionsHeading")}`, "");
   if (actions.length) lines.push(...actions.map((line) => `- ${line}`));
   else lines.push(localize("SCLS.Export.NoActions"));
   return `${lines.join("\n")}\n`;
 }
 
-// One line per damage, healing or control event, plus a line when someone drops to 0 HP.
-function actionLines(events, participants) {
+// Damage per round of the party and the enemies. Logs saved before 1.1 have no per round numbers stored.
+function roundRows(log) {
+  const stored = log?.computed?.byRound;
+  const rows = Array.isArray(stored) ? stored : CombatStatsService.compute(log ?? {}, { defaultDprMethod: log?.computed?.dpr?.method }).byRound;
+  return rows.some((row) => Number(row.partyDamage) || Number(row.enemyDamage)) ? rows : [];
+}
+
+// One line per damage, healing or control event, plus a line when someone drops to 0 HP (Crucible: a new state).
+function actionLines(events, participants, system = "") {
   const nameOf = (id, event, subject) => participants.get(id)?.name
     || (id && id === event?.data?.targetCombatantId ? event.data?.targetName : "")
     || localize(subject ? "SCLS.Report.Fallback.Someone" : "SCLS.Report.Fallback.Target");
@@ -105,10 +122,11 @@ function actionLines(events, participants) {
     const source = sourceId ? nameOf(sourceId, event, true) : "";
     const amount = eventAmount(event);
     let text = "";
+    const pool = isMoraleEvent(event) ? "morale" : "";
     if (isDamageApplied(event) && amount > 0) {
-      text = damageSentence({ source, target: nameOf(targetId, event, !source), amount: formatNumber(amount), action: actionName(event) });
+      text = damageSentence({ source, target: nameOf(targetId, event, !source), amount: formatNumber(amount), action: actionName(event), pool });
     } else if (isHealingApplied(event) && amount > 0) {
-      text = healingSentence({ source, target: nameOf(targetId, event, !source), amount: formatNumber(amount), action: actionName(event) });
+      text = healingSentence({ source, target: nameOf(targetId, event, !source), amount: formatNumber(amount), action: actionName(event), pool, system });
     } else if (isControl(event)) {
       text = controlSentence({ source, target: nameOf(targetId, event, !source), effect: String(event.data?.name ?? "").trim() || actionName(event) });
     }
@@ -117,7 +135,7 @@ function actionLines(events, participants) {
       const key = event.data?.duplicateOfEventId || event.id;
       if (key && seenDowns.has(key)) continue;
       if (key) seenDowns.add(key);
-      lines.push(roundLine(event.round, downSentence({ target: nameOf(targetId, event, true) })));
+      lines.push(roundLine(event.round, downSentence({ target: nameOf(targetId, event, true), state: downState(event) })));
     }
   }
   return lines;
@@ -143,6 +161,18 @@ const CSV_COLUMNS = Object.freeze([
   { labelKey: "SCLS.Export.Csv.DPR", key: "netDPR" }
 ]);
 
+// Crucible logs add the morale numbers after the damage columns.
+const CRUCIBLE_CSV_COLUMNS = Object.freeze([
+  { labelKey: "SCLS.Export.Csv.MoraleDealt", key: "moraleDamageDealt" },
+  { labelKey: "SCLS.Export.Csv.MoraleTaken", key: "moraleDamageTaken" }
+]);
+
+function csvColumns(log) {
+  if (!isCrucibleLog(log)) return CSV_COLUMNS;
+  const index = CSV_COLUMNS.findIndex((column) => column.key === "damageTakenNet") + 1;
+  return [...CSV_COLUMNS.slice(0, index), ...CRUCIBLE_CSV_COLUMNS, ...CSV_COLUMNS.slice(index)];
+}
+
 // One row per combatant for spreadsheets: comma separated, CRLF line ends and a byte order mark, so Excel reads umlauts as UTF-8.
 function renderCsvExport(log) {
   const participants = new Map((log?.participants ?? []).map((participant) => [String(participant?.combatantId ?? ""), participant]));
@@ -151,9 +181,10 @@ function renderCsvExport(log) {
     name: row.name || participants.get(String(row.id))?.name || String(row.id ?? ""),
     side: row.side ?? participants.get(String(row.id))?.side
   }));
+  const columns = csvColumns(log);
   const lines = [
-    CSV_COLUMNS.map((column) => csvCell(localize(column.labelKey))),
-    ...rows.map((row) => CSV_COLUMNS.map((column) => (column.text ? csvCell(String(column.text(row) ?? "")) : String(Number(row[column.key]) || 0))))
+    columns.map((column) => csvCell(localize(column.labelKey))),
+    ...rows.map((row) => columns.map((column) => (column.text ? csvCell(String(column.text(row) ?? "")) : String(Number(row[column.key]) || 0))))
   ];
   return `\uFEFF${lines.map((cells) => cells.join(",")).join("\r\n")}\r\n`;
 }

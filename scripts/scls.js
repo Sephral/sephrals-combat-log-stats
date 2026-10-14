@@ -63,6 +63,9 @@ function registerHooks() {
   Hooks.on("updateCombatant", track((combatant, changed) => combatLogService.combatantUpdated(combatant, changed)));
   Hooks.on("deleteCombatant", track((combatant) => combatLogService.combatantRemoved(combatant)));
   Hooks.on("createChatMessage", track((message) => combatLogService.chatMessageCreated(message)));
+  // Crucible applies an action card only when the GM confirms it, and can undo it again.
+  Hooks.on("updateChatMessage", track((message, changed) => combatLogService.chatMessageUpdated(message, changed)));
+  Hooks.on("deleteChatMessage", track((message) => combatLogService.chatMessageDeleted(message)));
 
   Hooks.on("preUpdateActor", (actor) => {
     if (!combatLogService || !isTrackingGM() || !actor?.uuid) return;
@@ -104,7 +107,8 @@ function applyLanguageChange() {
     button.title = localize("SCLS.SceneTool.Open");
     button.innerHTML = `<i class="fa-solid fa-chart-line" inert></i> ${localize("SCLS.SceneTool.Open")}`;
   }
-  ui.controls?.render?.();
+  // reset: the tool titles are read again from getSceneControlButtons.
+  ui.controls?.render?.({ reset: true });
 }
 
 Hooks.once("init", () => {
@@ -138,7 +142,11 @@ Hooks.once("ready", async () => {
   };
   Hooks.on("createSetting", (setting, _options, userId) => onIndexChanged(setting, userId));
   Hooks.on("updateSetting", (setting, _changes, _options, userId) => onIndexChanged(setting, userId));
-  // Writes are batched; a reload or closing the tab should not lose the last burst.
-  globalThis.addEventListener?.("beforeunload", () => void combatLogService?.flushPendingSaves());
+  // Writes are batched; a reload or closing the tab should not lose the last burst. The upload cannot finish
+  // while the page unloads, so the waiting logs are also kept in the browser until the next start.
+  globalThis.addEventListener?.("beforeunload", () => {
+    combatLogService?.stashPendingSaves();
+    void combatLogService?.flushPendingSaves();
+  });
   game.modules.get(MODULE_ID).api = { openCombatLog, service: combatLogService };
 });

@@ -110,6 +110,8 @@ export const EVENT_TYPES = Object.freeze({
   ROLL_SAVE: "roll.save",
   ROLL_CHECK: "roll.check",
   ROLL_OTHER: "roll.other",
+  // An action card whose outcome waits for the GM's confirmation (Crucible).
+  ACTION_USED: "action.used",
   RESOURCE_DELTA: "resource.delta",
   RESOURCE_DELTA_OFFLINE: "resource.delta.offlineDetected",
   ACTIVE_EFFECT_CREATED: "activeEffect.created",
@@ -176,5 +178,15 @@ export const TABS = Object.freeze(["history", "summary", "timeline", "statistics
 
 export const DEFAULT_RESOURCE_PATHS = Object.freeze({
   generic: ["system.attributes.hp.value", "system.attributes.hp.temp", "system.attributes.hp.tempmax", "system.attributes.hp.max"],
-  dnd5e: ["system.attributes.hp.value", "system.attributes.hp.temp", "system.attributes.hp.tempmax", "system.attributes.hp.max"]
+  dnd5e: ["system.attributes.hp.value", "system.attributes.hp.temp", "system.attributes.hp.tempmax", "system.attributes.hp.max"],
+  crucible: ["system.resources.health.value", "system.resources.wounds.value", "system.resources.morale.value", "system.resources.madness.value"]
 });
+
+// Resource pools of systems with more than hit points. Morale damage is counted apart from damage.
+export const RESOURCE_POOLS = Object.freeze({ HEALTH: "health", MORALE: "morale" });
+
+// States a combatant can reach in Crucible. Generic and dnd5e logs only know "0 HP".
+export const DOWN_STATES = Object.freeze({ WEAKENED: "weakened", DEAD: "dead", BROKEN: "broken", INSANE: "insane" });
+
+// Lifecycle of an action card that waits for confirmation.
+export const ACTION_STATUS = Object.freeze({ PENDING: "pending", CONFIRMED: "confirmed", REVERSED: "reversed", DELETED: "deleted" });

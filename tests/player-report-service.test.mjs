@@ -33,6 +33,7 @@ const ALL_SECTIONS = Object.freeze({
   controlPlays: true,
   closeCalls: true,
   damageSpotlight: true,
+  awards: true,
   heroMoments: true,
   enemyPressure: true,
   tacticalTurningPoints: true,
@@ -298,7 +299,7 @@ test("full visible DPR mode shares enemy totals but no single enemy actions", ()
 
 test("player report renders only selected report sections", () => {
   const markdown = markdownFor(reportLog({
-    reportSections: { ...ALL_SECTIONS, partyContributions: false, martialHighlights: false, spellwork: false, healingSupport: false, damageSpotlight: false, heroMoments: false, enemyPressure: false, tacticalTurningPoints: false, supportSaves: false, aftermath: false }
+    reportSections: { ...ALL_SECTIONS, partyContributions: false, martialHighlights: false, spellwork: false, healingSupport: false, damageSpotlight: false, awards: false, heroMoments: false, enemyPressure: false, tacticalTurningPoints: false, supportSaves: false, aftermath: false }
   }));
 
   assert.deepEqual(markdown.match(/^## .+$/gm), ["## Combat Recap", "## Control Plays", "## Close Calls"]);
@@ -354,7 +355,7 @@ test("report text comes from the language files", () => {
   const keys = markdownFor(reportLog(), "keys");
   const body = keys.split("\n").slice(1).filter(Boolean);
   assert.ok(body.length > 20);
-  for (const line of body) assert.match(line, /^(## |- )SCLS\.(ReportSection|Report)\./, line);
+  for (const line of body) assert.match(line, /^(## |- )SCLS\.(ReportSection|Report|Award)\./, line);
   assert.match(keys, /^## SCLS\.ReportSection\.CombatRecap$/m);
   assert.match(keys, /^- SCLS\.Report\.Recap\.DamageOther$/m);
   assert.match(keys, /^- SCLS\.Report\.Contribution\.Line$/m);
@@ -538,4 +539,71 @@ test("a long player report becomes several Discord messages that keep every line
   assert.ok(messages.length > 1);
   for (const message of messages) assert.ok(message.length <= 2000);
   assert.equal(messages.join("\n\n").split("\n").filter(Boolean).length, single.split("\n").filter(Boolean).length);
+});
+
+test("the awards section names party members only, with the share toggle and in the Discord copy", () => {
+  const log = reportLog();
+  log.computed.byCombatant = log.computed.dpr.byCombatant.map((entry) => ({ ...entry, control: entry.id === "controller" ? 1 : 0, takedowns: entry.id === "hero" ? 1 : 0, damageTakenNet: entry.id === "healer" ? 7 : 0 }));
+  const awards = section(markdownFor(log), "Awards");
+  assert.match(awards, /^- MVP: Hero, 26 damage and healing\.$/m);
+  assert.match(awards, /^- Best Healer: Healer, 11 healing\.$/m);
+  assert.match(awards, /^- Crowd Control: Controller, 1 control effect\.$/m);
+  assert.match(awards, /^- Takedowns: Hero, 1 takedown\.$/m);
+  assert.match(awards, /^- Clutch Save: Healer, 1 ally back on their feet\.$/m);
+  assert.doesNotMatch(awards, /Secret Foe|Charmed Paladin|Hidden Lurker|Enemy \d/);
+
+  assert.equal(section(markdownFor({ ...log, shareSettings: { ...log.shareSettings, reportSections: { ...ALL_SECTIONS, awards: false } } }), "Awards"), null);
+  const [discord] = new PlayerReportService().discordMessages(log);
+  assert.match(discord, /^\*\*Awards\*\*\n- MVP: \*\*Hero\*\*, 26 damage and healing\.$/m);
+
+  const german = section(markdownFor(log, "de"), "Auszeichnungen");
+  assert.match(german, /^- MVP: Hero, 26 Schaden und Heilung\.$/m);
+});
+
+test("Crucible reports speak of health, morale and the state reached instead of 0 HP", () => {
+  const log = reportLog();
+  log.systemId = "crucible";
+  log.events.find((event) => event.id === "downed").data.downState = "weakened";
+  log.events.push(hpDelta("taunt", 2, "controller", "foe", -4, 4, { pool: "morale", resourcePath: "system.resources.morale.value", actionName: "Taunt", actionKind: "other", downState: "broken", targetDowned: true }));
+  const markdown = markdownFor(log);
+  assert.match(section(markdown, "Combat Recap"), /^- The party restored 11 health during the fight\.$/m);
+  assert.match(section(markdown, "Combat Recap"), /^- A party member went down once\.$/m);
+  assert.match(section(markdown, "Close Calls"), /^- Round 2: Hero was weakened after Enemy 1 used Heavy Crossbow\.$/m);
+  assert.match(section(markdown, "Healing and Support"), /^- Round 2: Healer restored 6 health to Hero with Cure Wounds\.$/m);
+  assert.match(section(markdown, "Tactical Turning Points"), /1 party member down and 6 health restored/);
+  // The foe was already defeated by the hero; breaking it afterwards is no second defeat.
+  assert.match(section(markdown, "Hero Moments"), /Hero defeated Enemy 1 with Longsword/);
+  assert.doesNotMatch(section(markdown, "Hero Moments"), /Controller defeated Enemy 1/);
+  assert.doesNotMatch(markdown, /HP/);
+
+  const german = markdownFor(log, "de");
+  assert.match(german, /^- Runde 2: Hero wurde geschwächt, nachdem Gegner 1 Heavy Crossbow eingesetzt hatte\.$/m);
+  assert.doesNotMatch(german, /TP/);
+});
+
+test("Crucible morale damage is told as morale damage and not added to party damage", () => {
+  const log = reportLog({ includeNpcNames: true });
+  log.systemId = "crucible";
+  log.computed.dpr.byCombatant.find((entry) => entry.id === "controller").moraleDamageDealt = 9;
+  log.events.push(hpDelta("taunt", 1, "controller", "foe", -9, 9, { pool: "morale", resourcePath: "system.resources.morale.value", actionName: "Taunt", actionKind: "melee" }));
+  const markdown = markdownFor(log);
+  assert.match(section(markdown, "Blades and Bows"), /Controller hit Secret Foe with Taunt for 9 morale damage\./);
+  // The foe broke after it was already defeated by the hero: no second defeat for the controller.
+  assert.match(section(markdown, "Party Contributions"), /^- Controller: 9 morale damage, 1 melee hit and 1 control effect\.$/m);
+  assert.match(section(markdown, "Combat Recap"), /^- 1 enemy was defeated\.$/m);
+  assert.match(section(markdown, "Tactical Turning Points"), /^- Round 1: 20 damage by the party/m);
+});
+
+test("an undone Crucible hit is no hit in the report and its card's critical is no hero moment", () => {
+  const log = reportLog({ includeNpcNames: true });
+  log.systemId = "crucible";
+  log.events.push(
+    { id: "card", type: EVENT_TYPES.ACTION_USED, round: 3, combatantId: "controller", confidence: CONFIDENCE.SAFE, visibility: VISIBILITY.PUBLIC, data: { messageId: "m-undo", status: "reversed", actionName: "Longbow", actionKind: "ranged" } },
+    { id: "card-roll", type: EVENT_TYPES.ROLL_ATTACK, round: 3, combatantId: "controller", confidence: CONFIDENCE.SAFE, visibility: VISIBILITY.PUBLIC, source: { kind: SOURCE_KINDS.ROLL, id: "m-undo" }, data: { isCritical: true, actionName: "Longbow" } },
+    hpDelta("undone-hit", 3, "controller", "foe", -15, 15, { actionName: "Longbow", actionKind: "ranged", reversed: true }),
+    hpDelta("undo", 3, "controller", "foe", 15, 0, { interpretedAs: "correctionDamageDown", reversal: true, reversalOf: "undone-hit" })
+  );
+  const markdown = markdownFor(log);
+  assert.doesNotMatch(markdown, /Longbow/);
+  assert.doesNotMatch(section(markdown, "Party Contributions") ?? "", /Controller:[^\n]*ranged hit/);
 });

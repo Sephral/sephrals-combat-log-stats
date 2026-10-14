@@ -1,4 +1,5 @@
 import { CONFIDENCE, EVENT_TYPES, RESOURCE_INTERPRETATIONS } from "../constants.js";
+import { AUTOMATIC_STATUSES, CONTROL_STATUSES } from "../services/event-insights.js";
 import { getProperty, numberOrNull } from "../utils.js";
 
 export class GenericSystemAdapter {
@@ -64,8 +65,9 @@ export class GenericSystemAdapter {
     if (/attack|hit/.test(flavor)) return { type: EVENT_TYPES.ROLL_ATTACK, confidence: CONFIDENCE.UNCLEAR };
     if (/save|saving throw/.test(flavor)) return { type: EVENT_TYPES.ROLL_SAVE, confidence: CONFIDENCE.UNCLEAR };
     if (/check|skill|ability/.test(flavor)) return { type: EVENT_TYPES.ROLL_CHECK, confidence: CONFIDENCE.UNCLEAR };
-    // d20 rolls are tests, not damage. Other dice formulas without a hint may still be damage.
-    if (/\d*d20\b/.test(formula)) return { type: EVENT_TYPES.ROLL_OTHER, confidence: CONFIDENCE.UNCLEAR };
+    // d20 rolls are tests, not damage, also with advantage or disadvantage (2d20kh, 2d20kl). Other dice formulas
+    // without a hint may still be damage.
+    if (/\d*d20(?!\d)/.test(formula)) return { type: EVENT_TYPES.ROLL_OTHER, confidence: CONFIDENCE.UNCLEAR };
     if (/\d+d\d+/.test(formula)) return { type: EVENT_TYPES.ROLL_DAMAGE, confidence: CONFIDENCE.UNCLEAR };
     return { type: EVENT_TYPES.ROLL_OTHER, confidence: CONFIDENCE.UNCLEAR };
   }
@@ -77,6 +79,15 @@ export class GenericSystemAdapter {
   }
 
   registerSystemHooks() {}
+
+  // Conditions one combatant puts on another and states the system sets on its own.
+  controlStatuses() {
+    return CONTROL_STATUSES;
+  }
+
+  automaticStatuses() {
+    return AUTOMATIC_STATUSES;
+  }
 
   extractRollData(roll, message = null, classification = null) {
     const targets = this.extractMessageTargets(message);
@@ -126,7 +137,7 @@ export class GenericSystemAdapter {
 }
 
 // The roll's class and its parent classes, lowercased. Plain Roll and the module's test doubles give "".
-function rollClassNames(roll) {
+export function rollClassNames(roll) {
   const names = [];
   let proto = roll ? Object.getPrototypeOf(roll) : null;
   while (proto && proto !== Object.prototype) {
@@ -236,17 +247,23 @@ function collectTargetsFromValue(value, targets, path = "") {
   const uuid = value.uuid ?? value.documentUuid;
   if (maybeTarget) {
     if (typeof actorUuid === "string" && actorUuid.startsWith("Actor.")) targets.actorUuids.add(actorUuid);
-    if (typeof tokenUuid === "string" && tokenUuid.includes(".Token.")) targets.tokenUuids.add(tokenUuid);
+    if (tokenPart(tokenUuid)) targets.tokenUuids.add(tokenPart(tokenUuid));
     if (typeof uuid === "string" && uuid.startsWith("Actor.")) targets.actorUuids.add(uuid);
-    if (typeof uuid === "string" && uuid.includes(".Token.")) targets.tokenUuids.add(uuid);
+    // dnd5e names an unlinked target by its synthetic actor (Scene.x.Token.y.Actor.z): the token part identifies it.
+    if (tokenPart(uuid)) targets.tokenUuids.add(tokenPart(uuid));
     if (typeof value.name === "string") targets.names.add(cleanupName(value.name));
   }
   for (const [key, entry] of Object.entries(value)) collectTargetsFromValue(entry, targets, `${path}.${key}`);
 }
 
+function tokenPart(uuid) {
+  return typeof uuid === "string" ? /^Scene\.[^.]+\.Token\.[^.]+/.exec(uuid)?.[0] ?? "" : "";
+}
+
 function collectTargetPrimitive(value, targets, path) {
   if (typeof value !== "string" || !/target|hit|save/i.test(path)) return;
-  for (const match of value.matchAll(/Actor\.[A-Za-z0-9]+/g)) targets.actorUuids.add(match[0]);
+  // The actor part of a synthetic token actor (Scene.x.Token.y.Actor.z) is no world actor.
+  for (const match of value.matchAll(/(?<![.\w])Actor\.[A-Za-z0-9]+/g)) targets.actorUuids.add(match[0]);
   for (const match of value.matchAll(/Scene\.[A-Za-z0-9]+\.Token\.[A-Za-z0-9]+/g)) targets.tokenUuids.add(match[0]);
 }
 

@@ -979,6 +979,200 @@ p.scls-share-status.is-shared {
   font-weight: 600;
 }
 
+.scls-action--morale td:nth-child(4) {
+  color: #b9a7f0;
+}
+
+.scls-metric--morale {
+  border-left-color: #9085e9 !important;
+}
+
+/* Awards in the Summary tab */
+.scls-awards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+  gap: 0.45rem;
+  margin: 0.45rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scls-award {
+  display: grid;
+  grid-template-columns: 1.6rem minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
+  column-gap: 0.45rem;
+  align-items: center;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--scls-border);
+  border-left: 3px solid var(--scls-warn);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.scls-award > i {
+  grid-row: 1 / span 3;
+  color: var(--scls-warn);
+  font-size: 1.1rem;
+  text-align: center;
+}
+
+.scls-award__label {
+  color: var(--scls-muted);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+}
+
+.scls-award__names {
+  overflow-wrap: anywhere;
+}
+
+.scls-award__detail {
+  color: var(--scls-muted);
+  font-size: 0.8rem;
+}
+
+.scls-awards__hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+}
+
+/* Statistics charts. Inline SVG, colored only through these tokens. The window keeps its dark surface in
+   Foundry's light and dark theme, so one set of steps is enough. Series hues are validated for color vision
+   deficiencies against the dark surface; every bar carries a title for its tooltip. */
+.scls-window {
+  --scls-chart-party: #3987e5;
+  --scls-chart-enemies: #d95926;
+  --scls-chart-dealt: #3987e5;
+  --scls-chart-taken: #d95926;
+  --scls-chart-healing: #199e70;
+  --scls-chart-grid: rgba(255, 255, 255, 0.12);
+  --scls-chart-text: var(--scls-muted);
+}
+
+.scls-chart-layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.scls-chart {
+  margin: 0;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--scls-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.scls-chart figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.scls-chart figcaption h4 {
+  margin: 0;
+}
+
+.scls-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--scls-chart-text);
+  font-size: 0.78rem;
+}
+
+.scls-chart__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.scls-chart__swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 2px;
+}
+
+.scls-chart__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 22rem;
+  overflow: visible;
+}
+
+.scls-chart__grid {
+  stroke: var(--scls-chart-grid);
+  stroke-width: 1;
+}
+
+.scls-chart__axis,
+.scls-chart__value,
+.scls-chart__label {
+  fill: var(--scls-chart-text);
+  font-size: 10px;
+}
+
+.scls-chart__label {
+  fill: currentColor;
+  font-size: 11px;
+}
+
+.scls-chart__bar {
+  stroke: var(--scls-surface);
+  stroke-width: 1;
+}
+
+.scls-chart__bar:hover {
+  opacity: 0.8;
+}
+
+.scls-chart__bar--party,
+.scls-chart__swatch--party {
+  fill: var(--scls-chart-party);
+  background: var(--scls-chart-party);
+}
+
+.scls-chart__bar--enemies,
+.scls-chart__swatch--enemies {
+  fill: var(--scls-chart-enemies);
+  background: var(--scls-chart-enemies);
+}
+
+.scls-chart__bar--dealt,
+.scls-chart__swatch--dealt {
+  fill: var(--scls-chart-dealt);
+  background: var(--scls-chart-dealt);
+}
+
+.scls-chart__bar--taken,
+.scls-chart__swatch--taken {
+  fill: var(--scls-chart-taken);
+  background: var(--scls-chart-taken);
+}
+
+.scls-chart__bar--healing,
+.scls-chart__swatch--healing {
+  fill: var(--scls-chart-healing);
+  background: var(--scls-chart-healing);
+}
+
+@media (forced-colors: active) {
+  .scls-chart__bar,
+  .scls-chart__swatch {
+    forced-color-adjust: none;
+  }
+}
+
 .scls-combat-tracker-button {
   display: inline-flex;
   align-items: center;

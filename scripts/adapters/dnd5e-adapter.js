@@ -31,7 +31,10 @@ export class Dnd5eSystemAdapter extends GenericSystemAdapter {
 
   classifyRoll(roll, message) {
     const flags = message?.flags?.dnd5e ?? {};
-    const rollType = String(flags.roll?.type ?? roll?.options?.rollType ?? "");
+    // Item cards hold several rolls (midi-qol puts attack and damage into one card), so the roll's own type comes first.
+    const rollType = String(roll?.options?.rollType ?? flags.roll?.type ?? midiRollType(roll) ?? "");
+    // dnd5e rolls healing as a DamageRoll of the type healing or temphp.
+    if (rollType === "damage" && HEALING_TYPES.has(String(roll?.options?.type ?? ""))) return { type: EVENT_TYPES.ROLL_HEALING, confidence: CONFIDENCE.SAFE };
     if (ROLL_TYPES[rollType]) return { type: ROLL_TYPES[rollType], confidence: CONFIDENCE.SAFE };
     if (/initiative/i.test(String(message?.flavor ?? "")) || flags.core?.initiativeRoll || message?.flags?.core?.initiativeRoll) {
       return { type: EVENT_TYPES.ROLL_OTHER, confidence: CONFIDENCE.SAFE };
@@ -68,16 +71,111 @@ export class Dnd5eSystemAdapter extends GenericSystemAdapter {
     };
   }
 
-  // The tray and Actor5e#applyDamage pass the damage roll message as options.originatingMessage.
+  // The tray and Actor5e#applyDamage of dnd5e 5.3 pass the damage roll message as options.originatingMessage (5.2 does
+  // not). midi-qol applies its damage without a message, but names the attacker in options.midi.sourceActorUuid.
+  // The expected hit points let the service skip applications that changed nothing (0 damage after immunity).
   registerSystemHooks(service) {
-    globalThis.Hooks?.on?.("dnd5e.preApplyDamage", (actor, amount, _updates, options = {}) => {
+    globalThis.Hooks?.on?.("dnd5e.preApplyDamage", (actor, amount, updates, options = {}) => {
+      const hp = actor?.system?.attributes?.hp ?? {};
+      const expected = { value: numberOrUndefined(updates?.["system.attributes.hp.value"]), temp: numberOrUndefined(updates?.["system.attributes.hp.temp"]) };
+      const change = { value: [Number(hp.value), expected.value], temp: [Number(hp.temp), expected.temp] };
+      const midi = midiApplication(actor, change, options, Number(amount) || 0);
       service?.noteSystemApplication?.(actor, {
         amount: Number(amount) || 0,
-        message: options?.originatingMessage ?? null
+        message: options?.originatingMessage ?? midiCardOf(midi.sourceActorUuid),
+        sourceActorUuid: midi.sourceActorUuid,
+        reversal: midi.reversal,
+        expected,
+        options
       });
     });
   }
+
+  // An update that no hook announced on the recording GM's screen: midi-qol may apply damage on another GM's client
+  // or a player may click its damage card. The update options carry midi-qol's options to every client.
+  describeUpdateApplication(actor, before, after, options = {}) {
+    if (!options?.midi) return null;
+    const hp = (snapshot) => snapshot?.system?.attributes?.hp ?? {};
+    const change = { value: [Number(hp(before).value), Number(hp(after).value)], temp: [Number(hp(before).temp), Number(hp(after).temp)] };
+    const amount = ((change.value[0] || 0) + (change.temp[0] || 0)) - ((change.value[1] || 0) + (change.temp[1] || 0));
+    const midi = midiApplication(actor, change, options, amount);
+    if (!midi.sourceActorUuid && !midi.reversal) return null;
+    return { amount, messageId: "", message: midiCardOf(midi.sourceActorUuid), sourceActorUuid: midi.sourceActorUuid, reversal: midi.reversal };
+  }
+
+  // With gmAttackDamageCards midi-qol posts a GM copy of rolls that are also in its item card.
+  skipRolls(message) {
+    return Boolean(message?.flags?.["midi-qol"]?.gmHide);
+  }
+
+  // midi-qol re-creates a finished item card from its data when damage is rolled again: same timestamp and speaker,
+  // new id, the old rolls included. Their rolls belong to the first card.
+  findCopiedCard(message) {
+    if (!message?.flags?.["midi-qol"] || !message.timestamp) return null;
+    const twin = Array.from(globalThis.game?.messages?.contents ?? []).find((other) => other?.id !== message.id && other?.flags?.["midi-qol"]
+      && other.timestamp === message.timestamp && other.speaker?.actor === message.speaker?.actor && other.speaker?.token === message.speaker?.token);
+    return twin?.id ?? null;
+  }
 }
+
+const HEALING_TYPES = new Set(["healing", "temphp"]);
+
+function numberOrUndefined(value) {
+  return value === undefined || value === null || value === "" || !Number.isFinite(Number(value)) ? undefined : Number(value);
+}
+
+// midi-qol marks its rolls with defaultDamage, otherDamage or bonusDamage, and formula rolls with utility.
+function midiRollType(roll) {
+  const type = String(roll?.options?.["midi-qol"]?.rollType ?? "");
+  if (/damage/i.test(type)) return "damage";
+  if (type === "utility") return "generic";
+  return type || null;
+}
+
+// The attacker of a midi-qol application, and whether it undoes an earlier one.
+// * A workflow names the attacker in options.midi.sourceActorUuid. applyTokenDamage and overtime effects may name the
+//   damaged actor itself; that is no attacker (self healing is).
+// * The buttons of midi-qol's damage card (apply, undo) may pass stored options without the attacker; the card names
+//   it in flags.midi-qol.actorUuid and keeps the hit points before and after each target's change.
+// * A change from a card's "after" back to its "before" is an undo. Any recent card counts, and temporary hit points
+//   must fit as well when the card knows them.
+// change: { value: [before, after], temp: [before, after] }
+function midiApplication(actor, change, options, amount = 0) {
+  const midi = options?.midi;
+  if (!midi) return { sourceActorUuid: "", reversal: false };
+  let sourceActorUuid = String(midi.sourceActorUuid ?? "");
+  if (sourceActorUuid && sourceActorUuid === actor?.uuid && amount > 0) sourceActorUuid = "";
+  const entryOf = (message) => {
+    const list = message?.flags?.["midi-qol"]?.undoDamage;
+    return Array.isArray(list) ? list.find((entry) => entry?.actorUuid === actor?.uuid) ?? null : null;
+  };
+  const cards = findMidiCards((message) => Boolean(entryOf(message)));
+  const same = (expected, value) => Number.isFinite(value) && Number(expected) === value;
+  const loose = (expected, value) => expected === undefined || expected === null || !Number.isFinite(value) || Number(expected) === value;
+  const undone = cards.find((card) => {
+    const entry = entryOf(card);
+    const moved = Number(entry.oldHP) !== Number(entry.newHP) || Number(entry.oldTempHP ?? 0) !== Number(entry.newTempHP ?? 0);
+    return moved && same(entry.oldHP, change.value[1]) && same(entry.newHP, change.value[0])
+      && loose(entry.oldTempHP, change.temp[1]) && loose(entry.newTempHP, change.temp[0]);
+  });
+  const card = undone ?? cards[0] ?? null;
+  const cardSource = String(card?.flags?.["midi-qol"]?.actorUuid ?? "");
+  return { sourceActorUuid: sourceActorUuid || (cardSource !== actor?.uuid || amount <= 0 ? cardSource : ""), reversal: Boolean(undone) };
+}
+
+// The last chat messages of midi-qol that fit, newest first.
+function findMidiCards(test, limit = 40) {
+  const messages = Array.from(globalThis.game?.messages?.contents ?? []).slice(-limit).reverse();
+  return messages.filter((message) => message?.flags?.["midi-qol"] && test(message));
+}
+
+// The newest item card of the attacker, for the action name and the roll of an application.
+function midiCardOf(sourceActorUuid) {
+  if (!sourceActorUuid) return null;
+  return findMidiCards((message) => message.flags["midi-qol"].sourceActorUuid === sourceActorUuid && Array.from(message.rolls ?? []).length > 0)[0] ?? null;
+}
+
+export const __test__ = { midiApplication, midiRollType };
 
 function resolveItem(message, flags) {
   const uuid = flags.item?.uuid;

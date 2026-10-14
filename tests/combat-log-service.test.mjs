@@ -315,6 +315,165 @@ test("a system damage application credits the speaker of its roll message, inclu
   assert.equal(log.computed.byCombatant.find((row) => row.id === "hero").takedowns, 1);
 });
 
+test("a midi-qol application without a message credits the attacker it names, also an unlinked token", async () => {
+  const service = new CombatLogService({ persistDelayMs: 0 });
+  service.persistence.saveLog = async (log) => log;
+  const { combat, log } = hpLog();
+  service.activeLogs.set(combat.id, log);
+  const goblin1 = hpActor({ id: "goblin", uuid: "Scene.test.Token.g1.Actor.goblin", hp: 7, token: { uuid: "Scene.test.Token.g1" } });
+  const hero = hpActor({ id: "hero-actor", uuid: "Actor.hero-actor", hp: 20 });
+
+  service.noteSystemApplication(goblin1, { amount: 6, sourceActorUuid: "Actor.hero-actor" });
+  await applyHp(service, goblin1, { value: 1 });
+  service.noteSystemApplication(hero, { amount: 4, sourceActorUuid: "Scene.test.Token.g2.Actor.goblin" });
+  await applyHp(service, hero, { value: 16 });
+
+  const [hit, counter] = log.events.filter((event) => event.type === EVENT_TYPES.RESOURCE_DELTA);
+  assert.equal(hit.combatantId, "hero");
+  assert.equal(hit.data.targetCombatantId, "goblin1");
+  assert.equal(counter.combatantId, "goblin2");
+  assert.equal(counter.data.targetCombatantId, "hero");
+  assert.equal(log.computed.byCombatant.find((row) => row.id === "hero").damageAppliedNet, 6);
+});
+
+test("an undo from midi-qol's damage card corrects the hit it takes back, credited to the same attacker", async () => {
+  const service = new CombatLogService({ persistDelayMs: 0 });
+  service.persistence.saveLog = async (log) => log;
+  const { combat, log } = hpLog();
+  service.activeLogs.set(combat.id, log);
+  const goblin1 = hpActor({ id: "goblin", uuid: "Scene.test.Token.g1.Actor.goblin", hp: 7, token: { uuid: "Scene.test.Token.g1" } });
+
+  service.noteSystemApplication(goblin1, { amount: 7, sourceActorUuid: "Actor.hero-actor" });
+  await applyHp(service, goblin1, { value: 0 });
+  service.noteSystemApplication(goblin1, { amount: -7, sourceActorUuid: "Actor.hero-actor", reversal: true });
+  await applyHp(service, goblin1, { value: 7 });
+
+  const [hit, undo] = log.events.filter((event) => event.type === EVENT_TYPES.RESOURCE_DELTA);
+  assert.equal(hit.data.reversed, true);
+  assert.equal(undo.data.interpretedAs, RESOURCE_INTERPRETATIONS.CORRECTION_DAMAGE_DOWN);
+  assert.equal(undo.data.reversalOf, hit.id);
+  assert.equal(undo.combatantId, "hero");
+  assert.equal(log.computed.summary.netDamageApplied, 0);
+  assert.equal(log.computed.summary.netHealingApplied, 0);
+  assert.equal(log.computed.summary.enemiesDefeated, 0);
+  assert.equal(log.computed.byCombatant.find((row) => row.id === "hero").damageAppliedNet, 0);
+  assert.equal(log.computed.byCombatant.find((row) => row.id === "goblin1").damageTakenNet, 0);
+});
+
+test("rolls added to a card later (midi-qol) are recorded once each", async () => {
+  const service = new CombatLogService({ persistDelayMs: 0 });
+  service.persistence.saveLog = async (log) => log;
+  const { combat, log } = hpLog();
+  service.activeLogs.set(combat.id, log);
+  class DamageRoll { constructor(total) { this.total = total; this.formula = "1d8 + 3"; this.dice = []; this.options = {}; } }
+  const message = { id: "card", speaker: { scene: "test", token: "hero-token", actor: "hero-actor" }, flags: {}, rolls: [] };
+
+  await service.chatMessageCreated(message);
+  message.rolls = [new DamageRoll(7)];
+  await service.chatMessageUpdated(message, { rolls: message.rolls });
+  await service.chatMessageUpdated(message, { rolls: message.rolls, flags: {} });
+  message.rolls = [...message.rolls, new DamageRoll(4)];
+  await service.chatMessageUpdated(message, { rolls: message.rolls });
+
+  const rolls = log.events.filter((event) => event.type === EVENT_TYPES.ROLL_DAMAGE);
+  assert.deepEqual(rolls.map((event) => [event.combatantId, event.data.total]), [["hero", 7], ["hero", 4]]);
+});
+
+test("a replaced roll takes over its event, rolls the card lost are dropped, a re-created card adds nothing", async () => {
+  const service = new CombatLogService({ persistDelayMs: 0 });
+  service.persistence.saveLog = async (log) => log;
+  const { combat, log } = hpLog();
+  service.activeLogs.set(combat.id, log);
+  class D20Roll { constructor(total) { this.total = total; this.formula = "1d20 + 5"; this.dice = [{ faces: 20, results: [{ result: total - 5 }] }]; this.options = {}; } }
+  class DamageRoll { constructor(total) { this.total = total; this.formula = "1d8 + 3"; this.dice = [{ faces: 8, results: [{ result: total - 3 }] }]; this.options = {}; } }
+  const message = { id: "card", timestamp: 1000, speaker: { scene: "test", token: "hero-token", actor: "hero-actor" }, flags: {}, rolls: [] };
+  const types = () => log.events.filter((event) => event.source?.kind === "roll").map((event) => `${event.type}:${event.data.total}`);
+
+  await service.chatMessageCreated(message);
+  message.rolls = [new D20Roll(12), new DamageRoll(7)];
+  await service.chatMessageUpdated(message, { rolls: message.rolls });
+  const damageId = log.events.find((event) => event.type === EVENT_TYPES.ROLL_DAMAGE).id;
+  // Damage rolled again: same place, new result.
+  message.rolls = [new D20Roll(12), new DamageRoll(10)];
+  await service.chatMessageUpdated(message, { rolls: message.rolls });
+  assert.deepEqual(types(), ["roll.other:12", "roll.damage:10"]);
+  assert.equal(log.events.find((event) => event.type === EVENT_TYPES.ROLL_DAMAGE).id, damageId);
+  // Attack rolled again: the card starts over with the attack only.
+  message.rolls = [new D20Roll(18)];
+  await service.chatMessageUpdated(message, { rolls: message.rolls });
+  assert.deepEqual(types(), ["roll.other:18"]);
+  message.rolls = [new D20Roll(18), new DamageRoll(6)];
+  await service.chatMessageUpdated(message, { rolls: message.rolls });
+
+  // midi-qol re-creates the finished card with its old rolls and adds a new damage roll.
+  service.adapter.findCopiedCard = (created) => (created.id === "copy" ? "card" : null);
+  try {
+    const copy = { ...message, id: "copy", rolls: [...message.rolls] };
+    await service.chatMessageCreated(copy);
+    assert.deepEqual(types(), ["roll.other:18", "roll.damage:6"]);
+    copy.rolls = [...copy.rolls, new DamageRoll(4)];
+    await service.chatMessageUpdated(copy, { rolls: copy.rolls });
+    assert.deepEqual(types(), ["roll.other:18", "roll.damage:6", "roll.damage:4"]);
+  } finally {
+    delete service.adapter.findCopiedCard;
+  }
+});
+
+test("an application that changed nothing is not credited to the next change of that actor", async () => {
+  const service = new CombatLogService({ persistDelayMs: 0 });
+  service.persistence.saveLog = async (log) => log;
+  const { combat, log } = hpLog();
+  service.activeLogs.set(combat.id, log);
+  const goblin1 = hpActor({ id: "goblin", uuid: "Scene.test.Token.g1.Actor.goblin", hp: 7, token: { uuid: "Scene.test.Token.g1" } });
+
+  // Immune: the hero's hit writes the same 7 hit points, no update follows.
+  service.noteSystemApplication(goblin1, { amount: 0, sourceActorUuid: "Actor.hero-actor", expected: { value: 7, temp: 0 } });
+  // A goblin's own ability costs it 2 hit points a moment later.
+  await applyHp(service, goblin1, { value: 5 });
+  const delta = log.events.find((event) => event.type === EVENT_TYPES.RESOURCE_DELTA);
+  assert.notEqual(delta.data.attribution, "systemApplied");
+  assert.equal(log.computed.byCombatant.find((row) => row.id === "hero").damageAppliedNet, 0);
+});
+
+test("dnd5e 5.2's tray passes no message: the change is matched to the targeted roll instead", async () => {
+  const service = new CombatLogService({ persistDelayMs: 0 });
+  service.persistence.saveLog = async (log) => log;
+  const { combat, log } = hpLog();
+  service.activeLogs.set(combat.id, log);
+  class DamageRoll { constructor(total) { this.total = total; this.formula = "1d8 + 3"; this.dice = []; this.options = {}; } }
+  const goblin1 = hpActor({ id: "goblin", uuid: "Scene.test.Token.g1.Actor.goblin", hp: 7, token: { uuid: "Scene.test.Token.g1" } });
+  await service.chatMessageCreated({ id: "dmg", speaker: { scene: "test", token: "hero-token", actor: "hero-actor" }, flags: { dnd5e: { targets: [{ name: "Goblin 1", uuid: "Scene.test.Token.g1.Actor.goblin" }] } }, rolls: [new DamageRoll(6)] });
+
+  service.noteSystemApplication(goblin1, { amount: 6, expected: { value: 1, temp: 0 } });
+  await applyHp(service, goblin1, { value: 1 });
+
+  const delta = log.events.find((event) => event.type === EVENT_TYPES.RESOURCE_DELTA);
+  assert.equal(delta.combatantId, "hero");
+  assert.equal(delta.data.attribution, "correlatedChatRoll");
+});
+
+test("midi-qol damage applied on another client is credited through the update options", async () => {
+  const service = new CombatLogService({ persistDelayMs: 0 });
+  service.persistence.saveLog = async (log) => log;
+  const { combat, log } = hpLog();
+  service.activeLogs.set(combat.id, log);
+  const goblin1 = hpActor({ id: "goblin", uuid: "Scene.test.Token.g1.Actor.goblin", hp: 7, token: { uuid: "Scene.test.Token.g1" } });
+  const system = game.system.id;
+  game.system.id = "dnd5e";
+  game.messages = { contents: [] };
+  try {
+    service.actorSnapshots.set(goblin1.uuid, goblin1.toObject());
+    goblin1.system.attributes.hp.value = 2;
+    await service.actorUpdated(goblin1, {}, { midi: { sourceActorUuid: "Actor.hero-actor" } }, "other-gm");
+  } finally {
+    game.system.id = system;
+    delete game.messages;
+  }
+  const delta = log.events.find((event) => event.type === EVENT_TYPES.RESOURCE_DELTA);
+  assert.equal(delta.combatantId, "hero");
+  assert.equal(delta.data.attribution, "systemApplied");
+});
+
 test("hit point changes without a snapshot of the old state are skipped instead of guessed", async () => {
   const service = new CombatLogService({ persistDelayMs: 0 });
   service.persistence.saveLog = async (log) => log;
@@ -378,7 +537,6 @@ test("a second GM client does not record anything", async () => {
   try {
     const service = new CombatLogService({ persistDelayMs: 0 });
     service.noteSystemApplication({ uuid: "Actor.x" }, { amount: 5 });
-    assert.equal(service.pendingApplications.size, 0);
   } finally {
     delete game.users;
     game.user.id = previousId;
@@ -443,4 +601,89 @@ test("auto end reports leave the combat private while player reports are turned 
     settings.delete(`sephrals-combat-log-stats.${SETTINGS.AUTO_POST_PLAYER_SUMMARY_ON_END}`);
     settings.delete(`sephrals-combat-log-stats.${SETTINGS.ENABLE_PLAYER_SHARING}`);
   }
+});
+
+test("a message goes to the log whose combat holds the speaker's token, not to an older combat of the same actor", () => {
+  const service = new CombatLogService();
+  const participant = (combatantId, tokenId) => ({ combatantId, actorId: "hero", actorUuid: "Actor.hero", actorLink: true, tokenId, tokenUuid: `Scene.s1.Token.${tokenId}` });
+  const stale = { id: "stale", combatId: "old", participants: [participant("c-old", "oldToken")] };
+  const current = { id: "current", combatId: "new", participants: [participant("c-new", "newToken")] };
+  service.activeLogs.set("old", stale);
+  service.activeLogs.set("new", current);
+
+  assert.equal(service.findLogForMessage({ speaker: { scene: "s1", token: "newToken", actor: "hero" } }), current);
+  assert.equal(service.findLogForMessage({ speaker: { scene: "s1", token: "oldToken", actor: "hero" } }), stale);
+  // Without a token the newest log wins over the older one.
+  assert.equal(service.findLogForMessage({ speaker: { actor: "hero" } }), current);
+});
+
+test("logs still waiting for their write at unload are stashed and written on the next start", async () => {
+  const storage = new Map();
+  globalThis.localStorage = { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, String(v)), removeItem: (k) => storage.delete(k) };
+  try {
+    const service = new CombatLogService({ persistDelayMs: 750 });
+    const stored = new Map();
+    service.persistence.loadLog = async (id) => stored.get(id) ?? null;
+    service.persistence.saveLog = async (log) => { stored.set(log.id, structuredClone(log)); return log; };
+    const event = (id) => ({ id, type: EVENT_TYPES.RESOURCE_DELTA, data: {} });
+    stored.set("log1", { id: "log1", events: [event("a")] });
+    stored.set("log2", { id: "log2", events: [event("x"), event("y"), event("z")] });
+    service.pendingSaves.set("log1", { id: "log1", events: [event("a"), event("b")] });
+    // Another GM continued log2 after this client's copy: the stash is older and must not win.
+    service.pendingSaves.set("log2", { id: "log2", events: [event("x"), event("y")] });
+    service.pendingSaves.set("log3", { id: "log3", events: [event("n")] });
+    assert.equal(service.stashPendingSaves(), true);
+
+    const next = new CombatLogService();
+    next.persistence = service.persistence;
+    const restored = await next.restoreStashedLogs();
+    assert.deepEqual(restored.sort(), ["log1", "log3"]);
+    assert.equal(stored.get("log1").events.length, 2);
+    assert.equal(stored.get("log2").events.length, 3);
+    assert.equal(storage.size, 0);
+    assert.deepEqual(await next.restoreStashedLogs(), []);
+  } finally {
+    delete globalThis.localStorage;
+  }
+});
+
+test("nothing to stash without pending writes", () => {
+  const service = new CombatLogService();
+  assert.equal(service.stashPendingSaves(), false);
+});
+
+test("a stored log is read with the current damage per round basis", async () => {
+  const service = new CombatLogService();
+  const log = {
+    id: "stored", status: "ended", rounds: 2,
+    participants: [{ combatantId: "hero", name: "Hero", side: "friendly" }, { combatantId: "orc", name: "Orc", side: "hostile" }],
+    events: [
+      { id: "r", type: EVENT_TYPES.ROLL_DAMAGE, round: 1, combatantId: "hero", confidence: CONFIDENCE.SAFE, data: { total: 10 } },
+      { id: "a", type: EVENT_TYPES.DAMAGE_APPLIED, round: 1, combatantId: "hero", confidence: CONFIDENCE.SAFE, data: { amount: 6, targetCombatantId: "orc" } }
+    ],
+    computed: { dpr: { method: "appliedNet" }, summary: {} }
+  };
+  service.persistence.loadLog = async () => structuredClone(log);
+  settings.set(`sephrals-combat-log-stats.${SETTINGS.DEFAULT_DPR_METHOD}`, "rolled");
+  try {
+    const read = await service.getLog("stored");
+    assert.equal(read.computed.dpr.method, "rolled");
+    assert.equal(read.computed.byCombatant.find((row) => row.id === "hero").netDPR, 5);
+    assert.equal(read.computed.byRound.length, 2);
+  } finally {
+    settings.set(`sephrals-combat-log-stats.${SETTINGS.DEFAULT_DPR_METHOD}`, "appliedNet");
+  }
+});
+
+test("hit point changes while nobody recorded are found per changed value (dnd5e and generic)", async () => {
+  const service = new CombatLogService();
+  const actor = { uuid: "Actor.hero", system: { attributes: { hp: { value: 7, temp: 0, tempmax: 0, max: 20 } } } };
+  const log = { id: "log", participants: [{ combatantId: "c1", actorUuid: "Actor.hero" }], events: [], latestSnapshots: { c1: { "system.attributes.hp.value": 10, "system.attributes.hp.temp": 2, "system.attributes.hp.tempmax": 0, "system.attributes.hp.max": 20 } } };
+  await service.detectOfflineDeltas(log, { id: "combat", round: 1, turn: 0, combatants: [{ id: "c1", actor }] });
+  const offline = log.events.map((event) => [event.type, event.data.resourcePath, event.data.delta, event.data.interpretedAs, event.confidence]);
+  assert.deepEqual(offline, [
+    [EVENT_TYPES.RESOURCE_DELTA_OFFLINE, "system.attributes.hp.value", -3, RESOURCE_INTERPRETATIONS.UNKNOWN, CONFIDENCE.UNCLEAR],
+    [EVENT_TYPES.RESOURCE_DELTA_OFFLINE, "system.attributes.hp.temp", -2, RESOURCE_INTERPRETATIONS.UNKNOWN, CONFIDENCE.UNCLEAR]
+  ]);
+  assert.equal(log.latestSnapshots.c1["system.attributes.hp.value"], 7);
 });

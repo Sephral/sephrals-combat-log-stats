@@ -1,8 +1,13 @@
-import { CONFIDENCE, EVENT_TYPES, RESOURCE_INTERPRETATIONS, SETTINGS, SHARE_MODES, SIDES, SOURCE_KINDS, VISIBILITY } from "../constants.js";
+import { CONFIDENCE, EVENT_TYPES, SETTINGS, SHARE_MODES, SIDES, SOURCE_KINDS, VISIBILITY } from "../constants.js";
 import { getSetting } from "../settings.js";
 import { activeLocale, escapeHtml, format, isoNow, localize } from "../utils.js";
+import { awardLine, computeAwards } from "./awards-service.js";
+import { termKey } from "./system-terms.js";
 import {
   actionName,
+  downIncidents,
+  downState,
+  eventActors,
   eventAmount,
   isAutomaticEffect,
   isControl,
@@ -13,11 +18,15 @@ import {
   isHealingApplied,
   isMagic,
   isMartial,
+  isMoraleEvent,
   isRanged,
-  isResourceDelta,
-  sourceCombatantId,
-  targetCombatantId
+  isUndone,
+  rescueIncidents,
+  reversedCardMessageIds
 } from "./event-insights.js";
+
+// Moved to event-insights.js in 1.1; the export service and older callers import them from here.
+export { downIncidents, eventActors };
 
 const PLAYER_VISIBLE_MODES = new Set([
   SHARE_MODES.SUMMARY_ONLY,
@@ -41,6 +50,7 @@ export const REPORT_SECTIONS = Object.freeze([
   { key: "controlPlays", labelKey: "SCLS.ReportSection.ControlPlays" },
   { key: "closeCalls", labelKey: "SCLS.ReportSection.CloseCalls" },
   { key: "damageSpotlight", labelKey: "SCLS.ReportSection.DamageSpotlight" },
+  { key: "awards", labelKey: "SCLS.ReportSection.Awards" },
   { key: "heroMoments", labelKey: "SCLS.ReportSection.HeroMoments", defaultSelected: false },
   { key: "enemyPressure", labelKey: "SCLS.ReportSection.EnemyPressure", defaultSelected: false },
   { key: "tacticalTurningPoints", labelKey: "SCLS.ReportSection.TacticalTurningPoints", defaultSelected: false },
@@ -243,6 +253,7 @@ function reportContext(log, share, { markNames = false } = {}) {
   const ctx = {
     share,
     mode,
+    system: String(log?.systemId ?? ""),
     includeEnemyStats: Boolean(share.includeEnemyStats) && ENEMY_STAT_MODES.has(mode),
     participants,
     events,
@@ -284,8 +295,11 @@ function publicEnemyName(participant, share, nextEnemyIndex) {
 function shareableEvents(log, share, hiddenIds) {
   const events = [];
   const privateRollIds = new Set();
+  const undoneCards = reversedCardMessageIds(log?.events ?? []);
   for (const event of log?.events ?? []) {
     if (!event || event.ignored || NON_REPORT_TYPES.has(event.type) || isCorrectionEvent(event)) continue;
+    // An undone action card (Crucible) is no hit and no critical; its damage is taken back by the reversal.
+    if (isUndone(event, undoneCards)) continue;
     if (isPrivateEvent(event)) {
       if (isRollEvent(event) && event.id) privateRollIds.add(event.id);
       if (!share.includePrivateRolls) continue;
@@ -317,50 +331,8 @@ function isCorrectionEvent(event) {
   return type.includes("correct") || type.includes("manual");
 }
 
-// Source and affected participant of an event. Damage or healing on oneself has no separate source.
-export function eventActors(event) {
-  const targetId = targetCombatantId(event);
-  const sourceId = sourceCombatantId(event);
-  return { sourceId: sourceId && sourceId !== targetId ? sourceId : "", targetId };
-}
-
 function eventEntry(event, index) {
   return { event, index, round: event.round, amount: eventAmount(event), ...eventActors(event) };
-}
-
-// Each drop to 0 HP once. A hit point change that confirms a chat application belongs to that application.
-export function downIncidents(events) {
-  return incidents(events, (event) => isDowned(event));
-}
-
-// Healing that brought a participant back from 0 HP.
-function rescueIncidents(events) {
-  return incidents(events, (event, original) => {
-    if (!isResourceDelta(event)) return false;
-    const { oldValue, newValue, resourcePath = "" } = event.data ?? {};
-    if (oldValue === null || oldValue === undefined || oldValue === "" || Number(oldValue) !== 0 || !(Number(newValue) > 0)) return false;
-    if (/temp|max/i.test(String(resourcePath))) return false;
-    return event.data?.interpretedAs === RESOURCE_INTERPRETATIONS.HEALING || Boolean(original && isHealingApplied(original));
-  });
-}
-
-function incidents(events, matches) {
-  const byId = new Map(events.filter((event) => event?.id).map((event) => [event.id, event]));
-  const found = new Map();
-  events.forEach((event, index) => {
-    const original = byId.get(event.data?.duplicateOfEventId) ?? null;
-    if (!matches(event, original)) return;
-    const key = original?.id ?? event.data?.duplicateOfEventId ?? event.id ?? `index-${index}`;
-    if (found.has(key)) return;
-    const primary = original ?? event;
-    const own = eventActors(primary);
-    const detected = eventActors(event);
-    const targetId = own.targetId || detected.targetId;
-    if (!targetId) return;
-    const sourceId = own.sourceId || detected.sourceId;
-    found.set(key, { event: primary, events: [primary, event], index, round: primary.round ?? event.round, targetId, sourceId: sourceId !== targetId ? sourceId : "" });
-  });
-  return Array.from(found.values());
 }
 
 function reportSummary(ctx) {
@@ -424,14 +396,16 @@ function memberTotals(ctx, member) {
     return {
       damage: toNumber(row.damageAppliedNet),
       healing: toNumber(row.healingNet ?? row.healingAppliedNet),
+      morale: toNumber(row.moraleDamageDealt),
       dpr: toNumber(row.netDPR)
     };
   }
   const own = ctx.entries.filter((entry) => entry.sourceId === member.id);
-  const damage = sum(own.filter((entry) => isDamageDealt(entry.event)));
+  const damage = sum(own.filter((entry) => isDamageDealt(entry.event) && !isMoraleEvent(entry.event)));
   return {
     damage,
-    healing: sum(own.filter((entry) => isHealingApplied(entry.event))),
+    healing: sum(own.filter((entry) => isHealingApplied(entry.event) && !isMoraleEvent(entry.event))),
+    morale: sum(own.filter((entry) => isDamageDealt(entry.event) && isMoraleEvent(entry.event))),
     dpr: ctx.summary.rounds ? Math.round((damage / ctx.summary.rounds) * 100) / 100 : 0
   };
 }
@@ -448,6 +422,7 @@ const SECTION_BUILDERS = Object.freeze({
   controlPlays: controlLines,
   closeCalls: closeCallLines,
   damageSpotlight: spotlightLines,
+  awards: awardLines,
   heroMoments: heroMomentLines,
   enemyPressure: enemyPressureLines,
   tacticalTurningPoints: turningPointLines,
@@ -455,14 +430,19 @@ const SECTION_BUILDERS = Object.freeze({
   aftermath: aftermathLines
 });
 
+// The key for this log's system: Crucible texts speak of health and morale instead of hit points.
+function term(ctx, key) {
+  return termKey(ctx.system, key);
+}
+
 function recapLines(ctx) {
   const { summary } = ctx;
   const lines = [plural(summary.rounds, "SCLS.Report.Recap.DamageOne", "SCLS.Report.Recap.DamageOther", { damage: formatNumber(summary.netDamageApplied) })];
-  if (summary.netHealingApplied > 0) lines.push(format("SCLS.Report.Recap.Healing", { healing: formatNumber(summary.netHealingApplied) }));
+  if (summary.netHealingApplied > 0) lines.push(format(term(ctx, "SCLS.Report.Recap.Healing"), { healing: formatNumber(summary.netHealingApplied) }));
   if (summary.partyDPR > 0) lines.push(format("SCLS.Report.Recap.Pace", { dpr: formatNumber(summary.partyDPR) }));
   if (summary.defeatedEnemies > 0) lines.push(plural(summary.defeatedEnemies, "SCLS.Report.Recap.DefeatedOne", "SCLS.Report.Recap.DefeatedOther"));
-  if (summary.partyDowns > 0) lines.push(plural(summary.partyDowns, "SCLS.Report.Recap.PartyDownOne", "SCLS.Report.Recap.PartyDownOther"));
-  if (summary.unclassifiedDeltas > 0) lines.push(plural(summary.unclassifiedDeltas, "SCLS.Report.Recap.UnclearOne", "SCLS.Report.Recap.UnclearOther"));
+  if (summary.partyDowns > 0) lines.push(plural(summary.partyDowns, term(ctx, "SCLS.Report.Recap.PartyDownOne"), term(ctx, "SCLS.Report.Recap.PartyDownOther")));
+  if (summary.unclassifiedDeltas > 0) lines.push(plural(summary.unclassifiedDeltas, term(ctx, "SCLS.Report.Recap.UnclearOne"), term(ctx, "SCLS.Report.Recap.UnclearOther")));
   return lines;
 }
 
@@ -480,6 +460,7 @@ function contributionLines(ctx) {
     const details = [];
     if (totals.damage > 0) details.push(format("SCLS.Report.Count.Damage", { amount: formatNumber(totals.damage) }));
     if (totals.healing > 0) details.push(format("SCLS.Report.Count.Healing", { amount: formatNumber(totals.healing) }));
+    if (totals.morale > 0) details.push(format("SCLS.Crucible.Report.Count.MoraleDamage", { amount: formatNumber(totals.morale) }));
     for (const [count, oneKey, otherKey] of counts) if (count > 0) details.push(plural(count, oneKey, otherKey));
     if (!details.length) return format("SCLS.Report.Contribution.Quiet", { name: member.name });
     return format("SCLS.Report.Contribution.Line", { name: member.name, details: joinList(details) });
@@ -496,7 +477,8 @@ function spellLines(ctx) {
   const groups = new Map();
   for (const entry of hits) {
     const action = actionOf(ctx, entry.event);
-    if (!action) continue;
+    // Area totals add up damage. Morale damage (Crucible) is told hit by hit.
+    if (!action || isMoraleEvent(entry.event)) continue;
     const key = `${entry.round ?? ""}|${entry.sourceId}|${action.toLowerCase()}`;
     const group = groups.get(key) ?? { round: entry.round, sourceId: entry.sourceId, action, total: 0, targets: new Set(), entries: [] };
     group.total += entry.amount;
@@ -528,7 +510,9 @@ function healingLines(ctx) {
     source: entry.sourceId ? nameOf(ctx, entry.sourceId) : "",
     target: nameOf(ctx, entry.targetId, TARGET_FALLBACK),
     amount: formatNumber(entry.amount),
-    action: actionOf(ctx, entry.event)
+    action: actionOf(ctx, entry.event),
+    pool: isMoraleEvent(entry.event) ? "morale" : "",
+    system: ctx.system
   })));
 }
 
@@ -547,6 +531,11 @@ function spotlightLines(ctx) {
     .sort((left, right) => right.totals.damage - left.totals.damage)
     .slice(0, 5)
     .map(({ member, totals }) => format("SCLS.Report.Spotlight.Line", { name: member.name, damage: formatNumber(totals.damage), dpr: formatNumber(totals.dpr) }));
+}
+
+// Awards for party members: MVP, best healer, damage sponge and more (see awards-service.js).
+function awardLines(ctx) {
+  return computeAwards({ members: partyMembers(ctx), rows: ctx.stats?.byCombatant ?? ctx.stats?.dpr?.byCombatant ?? [], events: ctx.events }).map(awardLine);
 }
 
 function heroMomentLines(ctx) {
@@ -594,7 +583,7 @@ function turningPointLines(ctx) {
   const healing = new Set(healingEntries(ctx));
   for (const entry of ctx.entries) {
     if (!(Number(entry.round) > 0)) continue;
-    if (isDamageDealt(entry.event) && isParty(ctx, entry.sourceId)) bucket(entry.round).damage += entry.amount;
+    if (isDamageDealt(entry.event) && !isMoraleEvent(entry.event) && isParty(ctx, entry.sourceId)) bucket(entry.round).damage += entry.amount;
     if (healing.has(entry)) bucket(entry.round).healing += entry.amount;
     if (isControl(entry.event) && isParty(ctx, entry.sourceId)) bucket(entry.round).control += 1;
   }
@@ -609,16 +598,16 @@ function turningPointLines(ctx) {
     .sort((left, right) => (right.score - left.score) || (left.round - right.round))
     .slice(0, 3)
     .sort((left, right) => left.round - right.round)
-    .map((round) => roundLine(round.round, format("SCLS.Report.Turning.Line", { parts: joinList(turningParts(round)) })));
+    .map((round) => roundLine(round.round, format("SCLS.Report.Turning.Line", { parts: joinList(turningParts(ctx, round)) })));
 }
 
-function turningParts(round) {
+function turningParts(ctx, round) {
   const parts = [];
   if (round.damage > 0) parts.push(format("SCLS.Report.Count.PartyDamage", { amount: formatNumber(round.damage) }));
   if (round.defeats > 0) parts.push(plural(round.defeats, "SCLS.Report.Count.DefeatOne", "SCLS.Report.Count.DefeatOther"));
-  if (round.downs > 0) parts.push(plural(round.downs, "SCLS.Report.Count.DownOne", "SCLS.Report.Count.DownOther"));
+  if (round.downs > 0) parts.push(plural(round.downs, term(ctx, "SCLS.Report.Count.DownOne"), term(ctx, "SCLS.Report.Count.DownOther")));
   if (round.control > 0) parts.push(plural(round.control, "SCLS.Report.Count.ControlOne", "SCLS.Report.Count.ControlOther"));
-  if (round.healing > 0) parts.push(format("SCLS.Report.Count.PartyHealing", { amount: formatNumber(round.healing) }));
+  if (round.healing > 0) parts.push(format(term(ctx, "SCLS.Report.Count.PartyHealing"), { amount: formatNumber(round.healing) }));
   return parts;
 }
 
@@ -651,7 +640,7 @@ function aftermathLines(ctx) {
   const down = members.filter((member) => isDownAtEnd(ctx, member.id));
   const standing = members.filter((member) => !down.includes(member));
   if (standing.length) lines.push(format("SCLS.Report.Aftermath.Standing", { names: joinList(standing.map((member) => member.name)) }));
-  if (down.length) lines.push(format("SCLS.Report.Aftermath.Down", { names: joinList(down.map((member) => member.name)) }));
+  if (down.length) lines.push(format(term(ctx, "SCLS.Report.Aftermath.Down"), { names: joinList(down.map((member) => member.name)) }));
   if (ctx.includeEnemyStats) {
     const enemies = Array.from(ctx.participants.values()).filter((participant) => participant.side === SIDES.HOSTILE);
     if (enemies.length) lines.push(format("SCLS.Report.Aftermath.Enemies", { defeated: formatNumber(ctx.summary.defeatedEnemies), total: formatNumber(enemies.length) }));
@@ -672,7 +661,8 @@ function hitLine(ctx, entry) {
     source: entry.sourceId ? nameOf(ctx, entry.sourceId) : "",
     target: nameOf(ctx, entry.targetId, entry.sourceId ? TARGET_FALLBACK : SOMEONE_FALLBACK),
     amount: formatNumber(entry.amount),
-    action: actionOf(ctx, entry.event)
+    action: actionOf(ctx, entry.event),
+    pool: isMoraleEvent(entry.event) ? "morale" : ""
   }));
 }
 
@@ -688,7 +678,8 @@ function downLine(ctx, down) {
   return roundLine(down.round, downSentence({
     source: down.sourceId ? nameOf(ctx, down.sourceId) : "",
     target: nameOf(ctx, down.targetId, TARGET_FALLBACK),
-    action: down.sourceId ? actionOf(ctx, ...down.events) : ""
+    action: down.sourceId ? actionOf(ctx, ...down.events) : "",
+    state: down.events.map(downState).find(Boolean) ?? ""
   }));
 }
 
@@ -700,14 +691,23 @@ export function roundLine(round, text) {
   return number > 0 ? format("SCLS.Report.RoundLine", { round: formatNumber(number), text }) : text;
 }
 
-export function damageSentence({ source = "", target = "", amount = "", action = "" } = {}) {
+// pool "morale" is Crucible's morale and madness. system picks the wording for hit points or health.
+export function damageSentence({ source = "", target = "", amount = "", action = "", pool = "" } = {}) {
+  if (pool === "morale") {
+    if (!source) return format("SCLS.Crucible.Report.Morale.Taken", { target, amount });
+    return format(action ? "SCLS.Crucible.Report.Morale.HitWith" : "SCLS.Crucible.Report.Morale.HitPlain", { source, target, amount, action });
+  }
   if (!source) return format("SCLS.Report.Hit.Taken", { target, amount });
   return format(action ? "SCLS.Report.Hit.With" : "SCLS.Report.Hit.Plain", { source, target, amount, action });
 }
 
-export function healingSentence({ source = "", target = "", amount = "", action = "" } = {}) {
-  if (!source) return format(action ? "SCLS.Report.Heal.SelfWith" : "SCLS.Report.Heal.Self", { target, amount, action });
-  return format(action ? "SCLS.Report.Heal.With" : "SCLS.Report.Heal.Plain", { source, target, amount, action });
+export function healingSentence({ source = "", target = "", amount = "", action = "", pool = "", system = "" } = {}) {
+  if (pool === "morale") {
+    if (!source) return format(action ? "SCLS.Crucible.Report.Morale.HealSelfWith" : "SCLS.Crucible.Report.Morale.HealSelf", { target, amount, action });
+    return format(action ? "SCLS.Crucible.Report.Morale.HealWith" : "SCLS.Crucible.Report.Morale.HealPlain", { source, target, amount, action });
+  }
+  if (!source) return format(termKey(system, action ? "SCLS.Report.Heal.SelfWith" : "SCLS.Report.Heal.Self"), { target, amount, action });
+  return format(termKey(system, action ? "SCLS.Report.Heal.With" : "SCLS.Report.Heal.Plain"), { source, target, amount, action });
 }
 
 export function controlSentence({ source = "", target = "", effect = "" } = {}) {
@@ -715,7 +715,13 @@ export function controlSentence({ source = "", target = "", effect = "" } = {}) 
   return format(effect ? "SCLS.Report.Control.Named" : "SCLS.Report.Control.Unnamed", { source, target, effect });
 }
 
-export function downSentence({ source = "", target = "", action = "" } = {}) {
+// state is the Crucible state reached (weakened, dead, broken, insane). Without it the sentence speaks of 0 HP.
+export function downSentence({ source = "", target = "", action = "", state = "" } = {}) {
+  if (state) {
+    const data = { source, target, action, state: localize(`SCLS.Crucible.StateText.${state}`) };
+    if (!source) return format("SCLS.Crucible.Report.Down.Plain", data);
+    return format(action ? "SCLS.Crucible.Report.Down.BySourceWith" : "SCLS.Crucible.Report.Down.BySource", data);
+  }
   if (!source) return format("SCLS.Report.Down.Plain", { target });
   return format(action ? "SCLS.Report.Down.BySourceWith" : "SCLS.Report.Down.BySource", { source, target, action });
 }

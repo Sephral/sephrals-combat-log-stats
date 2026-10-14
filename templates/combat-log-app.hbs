@@ -98,12 +98,29 @@
         <div class="scls-metric scls-metric--hostile"><span>{{sclsLocalize "SCLS.Label.EnemiesDefeated"}}</span><strong>{{summary.enemiesDefeated}}</strong></div>
         <div class="scls-metric scls-metric--friendly"><span>{{sclsLocalize "SCLS.Label.PartyDowned"}}</span><strong>{{summary.partyDowned}}</strong></div>
         <div class="scls-metric"><span>{{sclsLocalize "SCLS.Label.CriticalHits"}}</span><strong>{{summary.criticalHits}}</strong></div>
+        {{#if showMorale}}<div class="scls-metric scls-metric--morale"><span>{{sclsLocalize "SCLS.Label.MoraleDamage"}}</span><strong>{{summary.moraleDamage}}</strong></div>{{/if}}
         <div class="scls-metric scls-metric--correction"><span>{{sclsLocalize "SCLS.Label.Corrections"}}</span><strong>+{{computed.summary.damageCorrectionsUp}} / -{{computed.summary.damageCorrectionsDown}}</strong></div>
       </div>
       {{#if summary.warnings.length}}
       <div class="scls-warning-list">
         {{#each summary.warnings}}<p>{{this}}</p>{{/each}}
       </div>
+      {{/if}}
+      <h4>{{sclsLocalize "SCLS.Metrics.Awards"}}</h4>
+      {{#if awards.length}}
+      <ul class="scls-awards" aria-label="{{sclsLocalize "SCLS.Metrics.Awards"}}">
+        {{#each awards}}
+        <li class="scls-award scls-award--{{this.key}}">
+          <i class="{{this.icon}}" aria-hidden="true"></i>
+          <span class="scls-award__label">{{this.label}}</span>
+          <strong class="scls-award__names">{{this.names}}</strong>
+          <span class="scls-award__detail">{{this.detail}}</span>
+        </li>
+        {{/each}}
+      </ul>
+      <p class="scls-muted scls-awards__hint">{{sclsLocalize "SCLS.Award.Hint"}}</p>
+      {{else}}
+      <p class="scls-muted">{{sclsLocalize "SCLS.Award.Empty"}}</p>
       {{/if}}
       <h4>{{sclsLocalize "SCLS.Metrics.Contributions"}}</h4>
       {{#if combatMetrics.contributionRows.length}}
@@ -141,7 +158,7 @@
         <thead><tr>{{#each dprColumns}}<th><button type="button" class="scls-sort-button {{#if this.active}}is-active{{/if}}" data-action="sortDpr" data-sort-key="{{this.key}}" title="{{this.label}}"><span>{{this.label}}</span><i class="{{this.icon}}" aria-hidden="true"></i></button></th>{{/each}}</tr></thead>
         <tbody>
           {{#each dprRows}}
-          <tr class="scls-side--{{this.side}}"><td><span class="scls-combatant-cell"><img class="scls-avatar--tiny" src="{{this.img}}" alt="">{{this.name}}</span></td><td>{{this.sideLabel}}</td><td>{{this.damageAppliedNet}}</td><td>{{this.damageTakenNet}}</td><td>{{this.healing}}</td><td>{{this.martial}}</td><td>{{this.ranged}}</td><td>{{this.magic}}</td><td>{{this.control}}</td><td>{{this.takedowns}}</td><td>{{this.downed}}</td><td>{{this.netDPR}}</td></tr>
+          <tr class="scls-side--{{this.side}}"><td><span class="scls-combatant-cell"><img class="scls-avatar--tiny" src="{{this.img}}" alt="">{{this.name}}</span></td><td>{{this.sideLabel}}</td><td>{{this.damageAppliedNet}}</td><td>{{this.damageTakenNet}}</td><td>{{this.healing}}</td><td>{{this.martial}}</td><td>{{this.ranged}}</td><td>{{this.magic}}</td><td>{{this.control}}</td><td>{{this.takedowns}}</td><td>{{this.downed}}</td>{{#if ../showMorale}}<td>{{this.moraleDamageDealt}}</td>{{/if}}<td>{{this.netDPR}}</td></tr>
           {{/each}}
         </tbody>
       </table>
@@ -152,7 +169,7 @@
 
     <section class="scls-panel" data-panel="corrections">
       <h3>{{sclsLocalize "SCLS.Tab.corrections"}}</h3>
-      <p class="scls-muted">{{sclsLocalize "SCLS.Label.AutomaticCorrections"}}</p>
+      <p class="scls-muted">{{automaticCorrectionsLabel}}</p>
       {{#if correctionEvents.length}}
       <table class="scls-table">
         <thead><tr><th>{{sclsLocalize "SCLS.Label.Round"}}</th><th>{{sclsLocalize "SCLS.Label.Target"}}</th><th>{{sclsLocalize "SCLS.Label.Delta"}}</th><th>{{sclsLocalize "SCLS.Label.Interpretation"}}</th><th>{{sclsLocalize "SCLS.Label.Source"}}</th><th>{{sclsLocalize "SCLS.Label.Reason"}}</th><th>{{sclsLocalize "SCLS.Label.Actions"}}</th></tr></thead>
@@ -160,7 +177,7 @@
           {{#each correctionEvents}}
           <tr class="{{#if this.ignored}}is-muted{{/if}}">
             <td>{{this.roundLabel}}</td>
-            <td><strong>{{this.targetName}}</strong><span class="scls-cell-note">{{this.label}}</span></td>
+            <td><strong>{{this.targetName}}</strong><span class="scls-cell-note">{{this.label}}</span>{{#if this.partsLabel}}<span class="scls-cell-note">{{this.partsLabel}}</span>{{/if}}</td>
             <td>{{this.data.oldValue}} → {{this.data.newValue}} ({{this.data.delta}})</td>
             <td>
               <select data-scls-action="classify" data-event-id="{{this.id}}" aria-label="{{sclsLocalize "SCLS.Label.Interpretation"}}">
@@ -189,7 +206,7 @@
         </tbody>
       </table>
       {{else}}
-      <p class="scls-muted">{{sclsLocalize "SCLS.Label.NoCorrections"}}</p>
+      <p class="scls-muted">{{noCorrectionsLabel}}</p>
       {{/if}}
 
       <h4>{{sclsLocalize "SCLS.Manual.Title"}}</h4>
@@ -287,6 +304,28 @@
 
     <section class="scls-panel" data-panel="statistics">
       <h3>{{sclsLocalize "SCLS.Tab.statistics"}}</h3>
+      {{#if charts.hasCharts}}
+      <div class="scls-chart-layout">
+        {{#if charts.roundChart}}
+        <figure class="scls-chart scls-metrics-block">
+          <figcaption><h4>{{sclsLocalize "SCLS.Chart.RoundDamage"}}</h4>
+            <ul class="scls-chart__legend">{{#each charts.roundLegend}}<li><i class="scls-chart__swatch scls-chart__swatch--{{this.tone}}" aria-hidden="true"></i>{{this.label}}</li>{{/each}}</ul>
+          </figcaption>
+          {{{charts.roundChart}}}
+        </figure>
+        {{/if}}
+        {{#if charts.combatantChart}}
+        <figure class="scls-chart scls-metrics-block">
+          <figcaption><h4>{{sclsLocalize "SCLS.Chart.Combatants"}}</h4>
+            <ul class="scls-chart__legend">{{#each charts.combatantLegend}}<li><i class="scls-chart__swatch scls-chart__swatch--{{this.tone}}" aria-hidden="true"></i>{{this.label}}</li>{{/each}}</ul>
+          </figcaption>
+          {{{charts.combatantChart}}}
+        </figure>
+        {{/if}}
+      </div>
+      {{else}}
+      <p class="scls-muted">{{sclsLocalize "SCLS.Chart.Empty"}}</p>
+      {{/if}}
       <div class="scls-metrics-layout">
         <section class="scls-metrics-block">
           <h4>{{sclsLocalize "SCLS.Metrics.DisciplineMix"}}</h4>
@@ -371,6 +410,7 @@
         <button type="button" data-action="exportJson" title="{{sclsLocalize "SCLS.Button.ExportJson"}}"><i class="fa-solid fa-file-code" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.ExportJson"}}</span></button>
         <button type="button" data-action="exportMarkdown" title="{{sclsLocalize "SCLS.Button.ExportMarkdown"}}"><i class="fa-brands fa-markdown" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.ExportMarkdown"}}</span></button>
         <button type="button" data-action="exportCsv" title="{{sclsLocalize "SCLS.Button.ExportCsv"}}"><i class="fa-solid fa-file-csv" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.ExportCsv"}}</span></button>
+        <button type="button" data-action="exportDebug" title="{{sclsLocalize "SCLS.Button.ExportDebugHint"}}"><i class="fa-solid fa-bug" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.ExportDebug"}}</span></button>
       </div>
     </section>
   {{/if}}

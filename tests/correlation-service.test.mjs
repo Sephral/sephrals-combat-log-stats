@@ -129,3 +129,34 @@ test("temporary and regular hit points of one update share their roll", () => {
   assert.equal(result.status, "correlated");
   assert.equal(result.rollEventId, "r1");
 });
+
+test("a roll already applied to its own target does not explain a matching change of somebody else", () => {
+  const service = new CorrelationService({ windowMs: 60000 });
+  const applied = { id: "applied", type: EVENT_TYPES.RESOURCE_DELTA, createdAt: now, combatantId: "hero", data: { delta: -5, interpretedAs: RESOURCE_INTERPRETATIONS.DAMAGE, targetCombatantId: "wizard", correlation: { status: "system", messageId: "message-r1", rollEventId: "r1" } } };
+  const log = { events: [roll("r1", { total: 4, targetCombatantIds: ["wizard"] }), applied] };
+
+  const result = service.correlateResourceDelta(log, damageDelta(-4, { targetCombatantId: "orc" }));
+
+  assert.equal(result.status, "uncorrelated");
+});
+
+test("an applied area roll still explains the change of another of its targets", () => {
+  const service = new CorrelationService({ windowMs: 60000 });
+  const applied = { id: "applied", type: EVENT_TYPES.RESOURCE_DELTA, createdAt: now, combatantId: "hero", data: { delta: -8, interpretedAs: RESOURCE_INTERPRETATIONS.DAMAGE, targetCombatantId: "orc1", correlation: { status: "system", messageId: "message-r1", rollEventId: "r1" } } };
+  const log = { events: [roll("r1", { total: 8, targetCombatantIds: ["orc1", "foe"] }), applied] };
+
+  const result = service.correlateResourceDelta(log, damageDelta(-8));
+
+  assert.equal(result.status, "correlated");
+  assert.equal(result.rollEventId, "r1");
+});
+
+test("an applied roll without targets may still explain another change", () => {
+  const service = new CorrelationService({ windowMs: 60000 });
+  const applied = { id: "applied", type: EVENT_TYPES.RESOURCE_DELTA, createdAt: now, combatantId: "hero", data: { delta: -6, interpretedAs: RESOURCE_INTERPRETATIONS.DAMAGE, targetCombatantId: "orc1", correlation: { status: "correlated", messageId: "message-r1", rollEventId: "r1" } } };
+  const log = { events: [roll("r1", { total: 6 }), applied] };
+
+  const result = service.correlateResourceDelta(log, damageDelta(-6));
+
+  assert.equal(result.status, "correlated");
+});
