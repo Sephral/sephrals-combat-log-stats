@@ -1,6 +1,7 @@
 import { EVENT_TYPES, HOOKS, MODULE_ID, SETTINGS } from "./constants.js";
 import { CombatLogApp } from "./apps/combat-log-app.js";
 import { CombatLogService } from "./services/combat-log-service.js";
+import { canViewCombatLogs } from "./services/player-view-service.js";
 import { getSetting, registerSettings } from "./settings.js";
 import { isGM, isTrackingGM, loadModuleTranslations, localize, registerTemplateHelpers } from "./utils.js";
 
@@ -8,9 +9,10 @@ let combatLogService = null;
 let combatLogApp = null;
 const TOOL_NAME = "sclsCombatLog";
 
+// GMs always, players read only while the setting "Players can view combat statistics" is on.
 export function openCombatLog(logId = null) {
-  if (!isGM()) {
-    ui.notifications.warn(localize("SCLS.Notification.GMOnly"));
+  if (!canViewCombatLogs()) {
+    ui.notifications.warn(localize("SCLS.Notification.PlayerAccessOff"));
     return null;
   }
   if (!combatLogService) return null;
@@ -26,7 +28,7 @@ export function openCombatLog(logId = null) {
 }
 
 function injectCombatTrackerButton(_app, html) {
-  if (!isGM()) return;
+  if (!canViewCombatLogs()) return;
   const root = html?.[0] ?? html;
   if (!root?.querySelector || root.querySelector(".scls-combat-tracker-button")) return;
   const button = document.createElement("button");
@@ -49,6 +51,7 @@ function track(handler) {
 
 function registerHooks() {
   Hooks.on(HOOKS.LANGUAGE_CHANGED, applyLanguageChange);
+  Hooks.on(HOOKS.PLAYER_ACCESS_CHANGED, applyPlayerAccessChange);
 
   Hooks.on("createCombat", track((combat) => combatLogService.startCombat(combat)));
   Hooks.on("combatStart", track((combat) => combatLogService.startCombat(combat, { force: true })));
@@ -79,7 +82,7 @@ function registerHooks() {
   Hooks.on("deleteActiveEffect", track((effect) => combatLogService.activeEffectChanged(EVENT_TYPES.ACTIVE_EFFECT_DELETED, effect, {})));
 
   Hooks.on("getSceneControlButtons", (controls) => {
-    if (!isGM()) return;
+    if (!canViewCombatLogs()) return;
     const tool = {
       name: TOOL_NAME,
       title: localize("SCLS.SceneTool.Open"),
@@ -111,6 +114,17 @@ function applyLanguageChange() {
   ui.controls?.render?.({ reset: true });
 }
 
+// The GM turned player access on or off: players get or lose the tool and the button at once, an open window closes.
+function applyPlayerAccessChange() {
+  if (isGM()) return;
+  if (!canViewCombatLogs()) {
+    void combatLogApp?.close?.();
+    combatLogApp = null;
+    for (const button of document.querySelectorAll(".scls-combat-tracker-button")) button.remove();
+  } else ui.combat?.render?.();
+  ui.controls?.render?.({ reset: true });
+}
+
 Hooks.once("init", () => {
   registerSettings();
   registerTemplateHelpers();
@@ -138,7 +152,10 @@ Hooks.once("ready", async () => {
   // The index setting changes whenever a GM saves logs. Changes from another client make the local copy stale.
   const indexKey = `${MODULE_ID}.${SETTINGS.INDEX}`;
   const onIndexChanged = (setting, userId) => {
-    if (setting?.key === indexKey && userId !== game.user.id) combatLogService?.persistence?.invalidate();
+    if (setting?.key !== indexKey || userId === game.user.id) return;
+    combatLogService?.persistence?.invalidate();
+    // Players hold no live log: their open window shows the fight again as the GM just saved it.
+    if (!isGM()) combatLogApp?.scheduleRefresh?.();
   };
   Hooks.on("createSetting", (setting, _options, userId) => onIndexChanged(setting, userId));
   Hooks.on("updateSetting", (setting, _changes, _options, userId) => onIndexChanged(setting, userId));

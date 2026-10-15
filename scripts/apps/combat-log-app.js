@@ -2,6 +2,7 @@ import { CONFIDENCE, EVENT_TYPES, HOOKS, LOG_STATUS, MODULE_ID, RESOURCE_INTERPR
 import { getSetting } from "../settings.js";
 import { downloadData, escapeHtml, format, formatDateTime, formatDuration, isTrackingGM, localize, renderAppTemplate } from "../utils.js";
 import { CombatLogExportService } from "../services/export-service.js";
+import { canWriteCombatLogs, effectiveShareMode, playerHistoryEntry, playerShareSettings, playerTabs, playerViewLog, SHAREABLE_MODES } from "../services/player-view-service.js";
 import { formatNumber, normalizeReportSections, PlayerReportService, REPORT_SECTIONS, reportSectionsWithContent, shareOptionAvailability } from "../services/player-report-service.js";
 import { awardDetail, awardLabel, computeAwards } from "../services/awards-service.js";
 import { CombatStatsService } from "../services/stats-service.js";
@@ -15,7 +16,6 @@ import {
 // Wide enough for all tabs with their labels in one row in English and German (measured: German needs 1155 px in
 // v14, 1130 px in v13). A narrower window shows the tabs as icons (fitTabs).
 const DEFAULT_POSITION = { width: 1200, height: 760 };
-const SHAREABLE_MODES = [SHARE_MODES.SUMMARY_ONLY, SHARE_MODES.PARTY_DPR_ONLY, SHARE_MODES.FULL_VISIBLE_DPR, SHARE_MODES.FULL_VISIBLE_RECAP, SHARE_MODES.PUBLIC_REPORT];
 const MANUAL_TYPES = [EVENT_TYPES.DAMAGE_MANUAL_ADDED, EVENT_TYPES.DAMAGE_MANUAL_REDUCED, EVENT_TYPES.HEALING_MANUAL_ADDED, EVENT_TYPES.HEALING_MANUAL_REDUCED];
 
 export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
@@ -30,24 +30,26 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       icon: "fa-solid fa-chart-line",
       resizable: true
     },
+    // Players may switch tabs, open a log and sort the Impact Meter. Everything else changes, hands out or exports
+    // a log and refuses them (gmOnly), also when such a button ends up in their window.
     actions: {
       switchTab: CombatLogApp.#onTab,
-      ignoreEvent: CombatLogApp.#onIgnoreEvent,
-      restoreEvent: CombatLogApp.#onRestoreEvent,
-      saveSharing: CombatLogApp.#onSaveSharing,
-      stopSharing: CombatLogApp.#onStopSharing,
-      renameLog: CombatLogApp.#onRenameLog,
-      postPlayerReport: CombatLogApp.#onPostPlayerReport,
-      createJournalReport: CombatLogApp.#onCreateJournalReport,
-      copyDiscordReport: CombatLogApp.#onCopyDiscordReport,
-      exportJson: CombatLogApp.#onExportJson,
-      exportMarkdown: CombatLogApp.#onExportMarkdown,
-      exportCsv: CombatLogApp.#onExportCsv,
-      exportDebug: CombatLogApp.#onExportDebug,
       openLog: CombatLogApp.#onOpenLog,
-      deleteLog: CombatLogApp.#onDeleteLog,
       sortDpr: CombatLogApp.#onSortDpr,
-      addAdjustment: CombatLogApp.#onAddAdjustment
+      ignoreEvent: gmOnly(CombatLogApp.#onIgnoreEvent),
+      restoreEvent: gmOnly(CombatLogApp.#onRestoreEvent),
+      saveSharing: gmOnly(CombatLogApp.#onSaveSharing),
+      stopSharing: gmOnly(CombatLogApp.#onStopSharing),
+      renameLog: gmOnly(CombatLogApp.#onRenameLog),
+      postPlayerReport: gmOnly(CombatLogApp.#onPostPlayerReport),
+      createJournalReport: gmOnly(CombatLogApp.#onCreateJournalReport),
+      copyDiscordReport: gmOnly(CombatLogApp.#onCopyDiscordReport),
+      exportJson: gmOnly(CombatLogApp.#onExportJson),
+      exportMarkdown: gmOnly(CombatLogApp.#onExportMarkdown),
+      exportCsv: gmOnly(CombatLogApp.#onExportCsv),
+      exportDebug: gmOnly(CombatLogApp.#onExportDebug),
+      deleteLog: gmOnly(CombatLogApp.#onDeleteLog),
+      addAdjustment: gmOnly(CombatLogApp.#onAddAdjustment)
     }
   };
 
@@ -76,10 +78,18 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     return super.close(options);
   }
 
+  // Players see the window read only, with the privacy choices of each combat (player-view-service.js).
+  get readOnly() {
+    return !canWriteCombatLogs();
+  }
+
   showLog(logId = null) {
     if (logId) {
       this.logId = logId;
       this.activeTab = "summary";
+    } else if (this.readOnly) {
+      // The tool or button brings up the running fight, if there is one (see getStoredLog).
+      this.preferRunning = true;
     }
     void this.render({ force: true });
   }
@@ -93,12 +103,38 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
   }
 
   async getLog() {
+    if (this.readOnly) return this.getStoredLog();
     if (this.logId) return this.service.getLog ? this.service.getLog(this.logId) : this.service.persistence.loadLog(this.logId);
     return this.service.listActiveLogs()[0] ?? null;
   }
 
+  // Players hold no live log. They read the store as the GM last saved it, which is at most a moment behind, and the
+  // window renders again whenever the GM saves (scls.js). The running fight stays selected after it ends.
+  async getStoredLog() {
+    const persistence = this.service.persistence;
+    if (!this.logId || this.preferRunning) {
+      this.preferRunning = false;
+      const active = (await persistence.loadActiveLogs?.()) ?? [];
+      const latest = active.sort((left, right) => String(right.startedAt ?? "").localeCompare(String(left.startedAt ?? "")))[0] ?? null;
+      if (latest) {
+        this.logId = latest.id;
+        return latest;
+      }
+    }
+    return this.logId ? persistence.loadLog(this.logId) : null;
+  }
+
+  statsOptions() {
+    return this.service.statsOptions?.() ?? {};
+  }
+
   // While a combat runs, only the recording GM holds the live log. A change made by another GM would be overwritten.
+  // Players change nothing.
   canEdit(log, { quiet = false } = {}) {
+    if (!canWriteCombatLogs()) {
+      if (!quiet) ui.notifications?.warn(localize("SCLS.Notification.ReadOnly"));
+      return false;
+    }
     if (log?.status !== LOG_STATUS.ACTIVE || isTrackingGM()) return true;
     if (!quiet) ui.notifications?.warn(format("SCLS.Notification.RecordedElsewhere", { name: game.users?.activeGM?.name ?? "" }));
     return false;
@@ -110,57 +146,94 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
   }
 
   async _prepareContext(_options) {
-    await this.service.flushPendingSaves?.();
-    const log = await this.getLog();
+    const readOnly = this.readOnly;
+    if (!readOnly) await this.service.flushPendingSaves?.();
+    const stored = await this.getLog();
+    // Players get a copy with only what they may see and its own numbers; nothing else of the log reaches the page.
+    const share = readOnly && stored ? playerShareSettings(stored) : null;
+    const log = share ? playerViewLog(stored, { statsOptions: this.statsOptions(), share }) : stored;
     this.renderedLog = log;
+    const tabIds = readOnly ? playerTabs({ roundLog: share?.roundLog ?? true }) : TABS;
+    // The tab first: the player history rows depend on it.
+    if (!log) this.activeTab = "history";
+    else if (!tabIds.includes(this.activeTab)) this.activeTab = "summary";
     const historyEntries = await this.service.persistence.loadHistoryEntries();
+    const rows = await this.historyRowsFor(historyEntries, log?.id ?? "", readOnly);
+    const historyDamageLabel = localize(readOnly ? "SCLS.Label.PartyNetDamage" : "SCLS.Label.NetDamage");
     if (!log) {
-      this.activeTab = "history";
       return {
+        readOnly,
         hasLog: false,
         hasHistory: historyEntries.length > 0,
         activeTab: this.activeTab,
-        tabs: visibleTabs(false, this.activeTab),
-        tabNavigation: tabNavigation(false, this.activeTab),
-        historyRows: historyRows(historyEntries)
+        tabs: visibleTabs(false, this.activeTab, tabIds),
+        tabNavigation: tabNavigation(false, this.activeTab, tabIds),
+        historyRows: rows,
+        historyDamageLabel
       };
     }
-    if (!TABS.includes(this.activeTab)) this.activeTab = "summary";
     const computed = log.computed ?? {};
-    const participantOptions = participantChoices(log);
-    // Building the report for every live render of another tab is wasted work; switching tabs renders again.
-    const sectionOptions = reportSectionOptions(log, { checkContent: this.activeTab === "sharing" });
-    return {
+    const enemyStats = share ? share.enemyStats : true;
+    // Without enemy numbers the totals are the party's (see withoutEnemyStats), and say so.
+    const damageLabel = localize(enemyStats ? "SCLS.Label.NetDamage" : "SCLS.Label.PartyNetDamage");
+    const healingLabel = localize(enemyStats ? "SCLS.Label.NetHealing" : "SCLS.Label.PartyNetHealing");
+    const context = {
+      readOnly,
+      enemyStats,
       hasLog: true,
       hasHistory: historyEntries.length > 0,
       log,
       computed,
       activeTab: this.activeTab,
-      tabs: visibleTabs(true, this.activeTab),
-      tabNavigation: tabNavigation(true, this.activeTab),
-      historyRows: historyRows(historyEntries, log.id),
+      tabs: visibleTabs(true, this.activeTab, tabIds),
+      tabNavigation: tabNavigation(true, this.activeTab, tabIds),
+      historyRows: rows,
+      historyDamageLabel,
+      netDamageLabel: damageLabel,
+      netHealingLabel: healingLabel,
       summary: summaryContext(log),
-      combatRounds: combatRounds(log),
-      combatMetrics: combatMetrics(log),
-      correctionEvents: correctionEvents(log),
-      manualAdjustmentEvents: manualAdjustmentEvents(log),
-      manualTypeOptions: MANUAL_TYPES.map((value) => ({ value, label: manualTypeLabel(value) })),
-      participantOptions,
+      combatRounds: combatRounds(log, { readOnly, enemyStats }),
+      combatMetrics: combatMetrics(log, { enemyStats, damageLabel }),
       participants: participantRows(log),
       dprRows: sortedDprRows(log, this.dprSort),
       dprColumns: dprColumns(this.dprSort, { morale: isCrucibleLog(log) }),
       showMorale: isCrucibleLog(log),
-      charts: chartContext(log),
+      charts: chartContext(log, { enemyStats }),
       awards: awardCards(log),
-      noCorrectionsLabel: localize(termKey(log.systemId, "SCLS.Label.NoCorrections")),
-      automaticCorrectionsLabel: localize(termKey(log.systemId, "SCLS.Label.AutomaticCorrections")),
       dprMethodLabel: localize(`SCLS.DprMethod.${computed.dpr?.method ?? "appliedNet"}`),
       sideRows: sideRows(log),
-      sharing: sharingContext(log, this.playerReports),
-      reportSectionOptions: sectionOptions,
-      hasReportSections: sectionOptions.some((option) => option.available),
       includeUnclearDeltasInStats: getSetting(SETTINGS.INCLUDE_UNCLEAR_DELTAS_IN_STATS, false)
     };
+    // Corrections and Sharing are GM tabs; players get none of their data.
+    if (readOnly) return context;
+    // Building the report for every live render of another tab is wasted work; switching tabs renders again.
+    const sectionOptions = reportSectionOptions(log, { checkContent: this.activeTab === "sharing" });
+    return {
+      ...context,
+      correctionEvents: correctionEvents(log),
+      manualAdjustmentEvents: manualAdjustmentEvents(log),
+      manualTypeOptions: MANUAL_TYPES.map((value) => ({ value, label: manualTypeLabel(value) })),
+      participantOptions: participantChoices(log),
+      noCorrectionsLabel: localize(termKey(log.systemId, "SCLS.Label.NoCorrections")),
+      automaticCorrectionsLabel: localize(termKey(log.systemId, "SCLS.Label.AutomaticCorrections")),
+      sharing: sharingContext(log, this.playerReports),
+      reportSectionOptions: sectionOptions,
+      hasReportSections: sectionOptions.some((option) => option.available)
+    };
+  }
+
+  // Players see each fight with its own privacy choices. Their rows are built only while the History tab is open:
+  // that takes a player view of every stored fight, and switching tabs renders again anyway.
+  async historyRowsFor(entries, selectedLogId, readOnly) {
+    if (!readOnly) return historyRows(entries, selectedLogId);
+    if (this.activeTab !== "history") return [];
+    const options = { statsOptions: this.statsOptions() };
+    const rows = [];
+    for (const entry of entries) {
+      const log = entry.loaded ? await this.service.persistence.loadLog(entry.combatLogId) : null;
+      rows.push(playerHistoryEntry(entry, log, options));
+    }
+    return historyRows(rows, selectedLogId);
   }
 
   async _onRender(context, options) {
@@ -198,12 +271,18 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
   }
 
   async saveLog(log) {
+    if (!canWriteCombatLogs()) return;
     await this.service.saveAndCompute(log, { immediate: true });
     await this.render();
   }
 
   scheduleLiveRender(log) {
     if (this.logId && log?.id !== this.logId) return;
+    this.scheduleRefresh();
+  }
+
+  // One render shortly after a burst of changes.
+  scheduleRefresh() {
     if (this.liveRenderQueued || !this.element?.isConnected) return;
     this.liveRenderQueued = true;
     setTimeout(() => {
@@ -213,6 +292,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
   }
 
   async handleSelectChange(event) {
+    if (!this.canEdit(null)) return null;
     const target = event.currentTarget;
     switch (target.dataset.sclsAction) {
       case "classify": return this.classifyEvent(target.dataset.eventId, target.value);
@@ -415,6 +495,17 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
   }
 }
 
+// Wraps an action that changes, hands out or exports a log. A player gets a warning and nothing happens.
+function gmOnly(handler) {
+  return function guardedAction(event, target) {
+    if (!canWriteCombatLogs()) {
+      globalThis.ui?.notifications?.warn(localize("SCLS.Notification.ReadOnly"));
+      return null;
+    }
+    return handler.call(this, event, target);
+  };
+}
+
 // Foundry's clipboard helper falls back to execCommand where the browser blocks the Clipboard API.
 async function copyText(text) {
   try {
@@ -564,8 +655,8 @@ function warningLines(counts, systemId = "") {
   return lines;
 }
 
-function visibleTabs(hasLog, activeTab) {
-  return TABS.filter((id) => hasLog || id === "history").map((id) => ({ id, label: localize(`SCLS.Tab.${id}`), icon: tabIcon(id), active: id === activeTab }));
+function visibleTabs(hasLog, activeTab, tabIds = TABS) {
+  return tabIds.filter((id) => hasLog || id === "history").map((id) => ({ id, label: localize(`SCLS.Tab.${id}`), icon: tabIcon(id), active: id === activeTab }));
 }
 
 function tabIcon(id) {
@@ -582,8 +673,8 @@ function tabIcon(id) {
   }
 }
 
-function tabNavigation(hasLog, activeTab) {
-  const tabs = visibleTabs(hasLog, activeTab);
+function tabNavigation(hasLog, activeTab, tabIds = TABS) {
+  const tabs = visibleTabs(hasLog, activeTab, tabIds);
   return {
     hasTabs: tabs.length > 0,
     historyTab: tabs.find((tab) => tab.id === "history") ?? null,
@@ -630,21 +721,28 @@ function appliedRollMessageIds(log) {
   return ids;
 }
 
-function combatRounds(log) {
+// readOnly (player view): no open action cards and no manual changes of the GM, they only count in the numbers.
+// enemyStats false: no healing of enemies and no enemy damage per round.
+function combatRounds(log, { readOnly = false, enemyStats = true } = {}) {
   const participants = participantLookup(log);
   const appliedMessages = appliedRollMessageIds(log);
+  const shown = (event) => {
+    if (!readOnly) return true;
+    if (event.type === EVENT_TYPES.ACTION_USED || MANUAL_TYPES.includes(event.type)) return false;
+    return enemyStats || !(isHealingApplied(event) && participants.byCombatantId.get(targetCombatantId(event))?.side === SIDES.HOSTILE);
+  };
   const roundNumbers = new Set((log.events ?? []).map((event) => Number(event.round) || 0).filter((round) => round > 0));
   const maxRound = Math.max(0, log.computed?.summary?.rounds ?? 0, ...roundNumbers);
   const rounds = [];
   for (let round = 1; round <= maxRound; round += 1) {
-    const events = (log.events ?? []).filter((event) => (Number(event.round) || 0) === round && !event.ignored);
+    const events = (log.events ?? []).filter((event) => (Number(event.round) || 0) === round && !event.ignored && shown(event));
     const actions = events.flatMap((event) => roundActions(event, participants, appliedMessages));
     if (!actions.length) continue;
     // The round totals come from the statistics when they are there, so the round log and the chart agree (damage
     // without a known source counts for the other side, corrections are taken back in the right round).
     const computedRound = log.computed?.byRound?.find((row) => Number(row.round) === round);
     const heroDamage = computedRound ? Number(computedRound.partyDamage) || 0 : sumRoundAmount(actions, SIDES.FRIENDLY, "damage");
-    const foeDamage = computedRound ? Number(computedRound.enemyDamage) || 0 : sumRoundAmount(actions, SIDES.HOSTILE, "damage");
+    const foeDamage = !enemyStats ? 0 : computedRound ? Number(computedRound.enemyDamage) || 0 : sumRoundAmount(actions, SIDES.HOSTILE, "damage");
     const healing = actions.filter((action) => action.kind === "healing").reduce((total, action) => total + action.amount, 0);
     rounds.push({
       round,
@@ -857,7 +955,7 @@ function participantChoices(log) {
 function participantRows(log) {
   return (log.participants ?? []).map((participant) => {
     const stats = log.computed?.byCombatant?.find((entry) => entry.id === participant.combatantId) ?? {};
-    return { ...participant, stats, sideOptions: sideOptions(participant.side) };
+    return { ...participant, stats, sideLabel: localize(`SCLS.Side.${participant.side ?? SIDES.UNKNOWN}`), sideOptions: sideOptions(participant.side) };
   });
 }
 
@@ -929,18 +1027,19 @@ function compareDprValues(left, right, type) {
 }
 
 // Statistics charts. Logs saved before 1.1 have no per round numbers, those are computed here.
-function chartContext(log) {
+// enemyStats false: the round chart shows the party only.
+function chartContext(log, { enemyStats = true } = {}) {
   const byRound = Array.isArray(log.computed?.byRound) ? log.computed.byRound : CombatStatsService.compute(log, {
     includeUnclearDeltasInStats: getSetting(SETTINGS.INCLUDE_UNCLEAR_DELTAS_IN_STATS, false),
     defaultDprMethod: log.computed?.dpr?.method
   }).byRound;
-  const roundChart = roundDamageChart(byRound, { formatValue: formatNumber });
+  const roundChart = roundDamageChart(byRound, { formatValue: formatNumber, enemies: enemyStats });
   const combatantChart = combatantBarChart(dprRows(log), { formatValue: formatNumber });
   return {
     hasCharts: Boolean(roundChart || combatantChart),
     roundChart,
     combatantChart,
-    roundLegend: [{ tone: "party", label: localize("SCLS.Chart.Party") }, { tone: "enemies", label: localize("SCLS.Chart.Enemies") }],
+    roundLegend: [{ tone: "party", label: localize("SCLS.Chart.Party") }, { tone: "enemies", label: localize("SCLS.Chart.Enemies") }].slice(0, enemyStats ? 2 : 1),
     combatantLegend: [
       { tone: "dealt", label: localize("SCLS.Label.DamageDealt") },
       { tone: "taken", label: localize("SCLS.Label.DamageTaken") },
@@ -968,7 +1067,7 @@ function sideRows(log) {
   return (log.computed?.dpr?.bySide ?? []).filter((row) => presentSides.has(row.id)).map((row) => ({ ...row, label: localize(`SCLS.Side.${row.id}`) }));
 }
 
-function combatMetrics(log) {
+function combatMetrics(log, { enemyStats = true, damageLabel = localize("SCLS.Label.NetDamage") } = {}) {
   const rows = dprRows(log);
   const summary = log.computed?.summary ?? {};
   const topDamage = Math.max(0, ...rows.map((row) => Number(row.damageAppliedNet) || 0));
@@ -996,7 +1095,7 @@ function combatMetrics(log) {
   const outputTotal = Math.max(1, totals.damage, totals.healing);
   const actionTotal = Math.max(1, totals.martial + totals.ranged + totals.magic + totals.control + totals.downed);
   const disciplineRows = [
-    metricDiscipline("damage", localize("SCLS.Label.NetDamage"), totals.damage, outputTotal, "damage"),
+    metricDiscipline("damage", damageLabel, totals.damage, outputTotal, "damage"),
     metricDiscipline("healing", localize("SCLS.Label.Healing"), totals.healing, outputTotal, "healing"),
     metricDiscipline("martial", localize("SCLS.Label.Martial"), totals.martial, actionTotal, "martial"),
     metricDiscipline("ranged", localize("SCLS.Label.Ranged"), totals.ranged, actionTotal, "ranged"),
@@ -1009,7 +1108,7 @@ function combatMetrics(log) {
     pressureRows: pressureRows(log),
     contributionRows,
     disciplineRows,
-    topActions: topActions(log),
+    topActions: topActions(log, { enemyStats }),
     totals
   };
 }
@@ -1028,7 +1127,8 @@ function pressureRows(log) {
   return rows.map((row) => ({ ...row, pressurePercent: percent(row.damageAppliedNet, topDamage) }));
 }
 
-function topActions(log) {
+// enemyStats false: actions of enemies stay out, their damage would be enemy numbers.
+function topActions(log, { enemyStats = true } = {}) {
   const participants = participantLookup(log);
   const actions = new Map();
   for (const event of log.events ?? []) {
@@ -1039,6 +1139,7 @@ function topActions(log) {
     const name = (kind === "control" ? event.data?.name : actionName(event)) || localize(`SCLS.ActionKind.${kind}`);
     const key = `${kind}:${normalizeLabel(name)}`;
     const source = participants.byCombatantId.get(sourceCombatantId(event));
+    if (!enemyStats && source?.side === SIDES.HOSTILE) continue;
     const row = actions.get(key) ?? { name, kind, kindLabel: localize(`SCLS.ActionKind.${kind}`), style: actionKind(event), uses: 0, amount: 0, actors: new Set() };
     row.uses += 1;
     row.amount += kind === "control" ? 0 : eventAmount(event);
@@ -1074,10 +1175,10 @@ function percent(value, total) {
   return Math.max(2, Math.min(100, Math.round((numericValue / numericTotal) * 100)));
 }
 
-// The mode the Sharing form preselects: the saved one, else the default from the settings.
+// The mode the Sharing form preselects: the saved one, else the default from the settings. The player view of the
+// window reads the same (player-view-service.js).
 function formShareMode(share = {}) {
-  if (SHAREABLE_MODES.includes(share.shareMode)) return share.shareMode;
-  return SHAREABLE_MODES.includes(getSetting(SETTINGS.DEFAULT_SHARE_MODE)) ? getSetting(SETTINGS.DEFAULT_SHARE_MODE) : SHARE_MODES.FULL_VISIBLE_RECAP;
+  return effectiveShareMode(share);
 }
 
 function sharingContext(log, playerReports) {
@@ -1188,6 +1289,7 @@ function interpretationOptions(selectedInterpretation, systemId = "") {
 }
 
 export const __test__ = {
+  gmOnly, visibleTabs, topActions,
   chartContext, awardCards, warningLines, combatMetrics, combatRounds, correctionEvents, dprRows, sortedDprRows, dprColumns, participantRows, manualAdjustmentEvents, historyRows, tabNavigation,
   confirmDeleteCombatLog, interpretationOptions, applyReportSettings, reportSettingsFromForm, reportPreviewHtml, reportSectionOptions, showReportSections, fitTabs, sharingContext, copyText, showDiscordParts, discordPartsContent
 };

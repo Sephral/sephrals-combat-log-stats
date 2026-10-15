@@ -4,7 +4,8 @@ export const SCHEMA_VERSION = 1;
 
 export const HOOKS = Object.freeze({
   LOG_UPDATED: `${MODULE_ID}.logUpdated`,
-  LANGUAGE_CHANGED: `${MODULE_ID}.languageChanged`
+  LANGUAGE_CHANGED: `${MODULE_ID}.languageChanged`,
+  PLAYER_ACCESS_CHANGED: `${MODULE_ID}.playerAccessChanged`
 });
 
 export const LANGUAGE_MODES = Object.freeze({
@@ -26,6 +27,7 @@ export const SETTINGS = Object.freeze({
   INCLUDE_UNCLEAR_DELTAS_IN_STATS: "includeUnclearDeltasInStats",
   DEFAULT_DPR_METHOD: "defaultDprMethod",
   ENABLE_PLAYER_SHARING: "enablePlayerSharing",
+  PLAYER_STATS_ACCESS: "playerStatsAccess",
   DEFAULT_SHARE_MODE: "defaultShareMode",
   DEFAULT_ANONYMIZE_ENEMIES: "defaultAnonymizeEnemies",
   AUTO_POST_PLAYER_SUMMARY_ON_END: "autoPostPlayerSummaryOnEnd",
@@ -175,6 +177,8 @@ export const SHARE_MODES = Object.freeze({
 });
 
 export const TABS = Object.freeze(["history", "summary", "timeline", "statistics", "dpr", "corrections", "participants", "sharing"]);
+// Tabs that change a log or hand it out. Players never get them.
+export const GM_TABS = Object.freeze(["corrections", "sharing"]);
 
 export const DEFAULT_RESOURCE_PATHS = Object.freeze({
   generic: ["system.attributes.hp.value", "system.attributes.hp.temp", "system.attributes.hp.tempmax", "system.attributes.hp.max"],

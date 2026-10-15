@@ -11,9 +11,10 @@ const COMBATANT_CHART = Object.freeze({ width: ROUND_CHART.minWidth, height: ROU
 const MAX_COMBATANTS = 12;
 
 // Party and enemy damage per round as grouped columns. rows: computed.byRound.
-export function roundDamageChart(rows = [], { formatValue = String } = {}) {
+// enemies false: party columns only (player view of a combat without enemy numbers).
+export function roundDamageChart(rows = [], { formatValue = String, enemies = true } = {}) {
   const data = (rows ?? []).filter((row) => Number(row?.round) > 0);
-  const values = data.flatMap((row) => [positive(row.partyDamage), positive(row.enemyDamage)]);
+  const values = data.flatMap((row) => enemies ? [positive(row.partyDamage), positive(row.enemyDamage)] : [positive(row.partyDamage)]);
   if (!data.length || !values.some(Boolean)) return "";
   const { height, top, bottom, left, right, bar, gap, minWidth } = ROUND_CHART;
   const group = Math.max(ROUND_CHART.group, (minWidth - left - right) / data.length);
@@ -24,10 +25,10 @@ export function roundDamageChart(rows = [], { formatValue = String } = {}) {
   const series = [
     { key: "party", label: localize("SCLS.Chart.Party"), value: (row) => positive(row.partyDamage) },
     { key: "enemies", label: localize("SCLS.Chart.Enemies"), value: (row) => positive(row.enemyDamage) }
-  ];
+  ].slice(0, enemies ? 2 : 1);
   const parts = [gridLines([0, max / 2, max], { y, left, right: width - right, formatValue })];
   data.forEach((row, index) => {
-    const start = left + (index * group) + ((group - (2 * bar) - gap) / 2);
+    const start = left + (index * group) + ((group - (series.length * bar) - ((series.length - 1) * gap)) / 2);
     series.forEach((entry, position) => {
       const value = entry.value(row);
       const tooltip = format("SCLS.Chart.RoundTooltip", { round: formatValue(row.round), side: entry.label, amount: formatValue(value) });
@@ -37,7 +38,8 @@ export function roundDamageChart(rows = [], { formatValue = String } = {}) {
     if (data.length <= 16 || index % 2 === 0) parts.push(`<text class="scls-chart__axis" x="${fixed(left + (index * group) + (group / 2))}" y="${height - 8}" text-anchor="middle">${escapeHtml(formatValue(row.round))}</text>`);
   });
   const totals = series.map((entry) => data.reduce((total, row) => total + entry.value(row), 0));
-  const label = format(data.length === 1 ? "SCLS.Chart.RoundSummaryOne" : "SCLS.Chart.RoundSummary", { count: formatValue(data.length), party: formatValue(totals[0]), enemies: formatValue(totals[1]) });
+  const key = enemies ? "SCLS.Chart.RoundSummary" : "SCLS.Chart.RoundSummaryParty";
+  const label = format(data.length === 1 ? `${key}One` : key, { count: formatValue(data.length), party: formatValue(totals[0]), enemies: formatValue(totals[1] ?? 0) });
   return svg({ width, height, label, body: parts.join("") });
 }
 

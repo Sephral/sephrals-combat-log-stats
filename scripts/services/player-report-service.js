@@ -37,9 +37,9 @@ const PLAYER_VISIBLE_MODES = new Set([
 ]);
 
 // Modes that may show numbers about the enemy side, and only when the GM includes enemy stats.
-const ENEMY_STAT_MODES = new Set([SHARE_MODES.FULL_VISIBLE_DPR, SHARE_MODES.FULL_VISIBLE_RECAP, SHARE_MODES.PUBLIC_REPORT]);
+export const ENEMY_STAT_MODES = new Set([SHARE_MODES.FULL_VISIBLE_DPR, SHARE_MODES.FULL_VISIBLE_RECAP, SHARE_MODES.PUBLIC_REPORT]);
 // Modes that may describe single actions. The other modes share totals only.
-const ACTION_DETAIL_MODES = new Set([SHARE_MODES.FULL_VISIBLE_RECAP, SHARE_MODES.PUBLIC_REPORT]);
+export const ACTION_DETAIL_MODES = new Set([SHARE_MODES.FULL_VISIBLE_RECAP, SHARE_MODES.PUBLIC_REPORT]);
 
 export const REPORT_SECTIONS = Object.freeze([
   { key: "combatRecap", labelKey: "SCLS.ReportSection.CombatRecap" },
@@ -271,7 +271,7 @@ function reportContext(log, share, { markNames = false } = {}) {
     share,
     mode,
     system: String(log?.systemId ?? ""),
-    includeEnemyStats: Boolean(share.includeEnemyStats) && ENEMY_STAT_MODES.has(mode),
+    includeEnemyStats: enemyStatsShared(share),
     participants,
     events,
     entries: events.map((event, index) => eventEntry(event, index)),
@@ -285,7 +285,20 @@ function reportContext(log, share, { markNames = false } = {}) {
   return ctx;
 }
 
-function participantDirectory(log, share, markNames = false) {
+// Enemy numbers need the GM's choice and a report detail that may show them. The player view of the log window
+// follows the same rule.
+export function enemyStatsShared(share = {}) {
+  return Boolean(share.includeEnemyStats) && ENEMY_STAT_MODES.has(share.shareMode ?? SHARE_MODES.GM_ONLY);
+}
+
+// Enemies are called Enemy 1, Enemy 2 and so on unless the GM shows their names for this combat.
+export function enemyNamesHidden(share = {}) {
+  return Boolean(share.anonymizeEnemies) && share.includeNpcNames !== true;
+}
+
+// Participants players may see, with the names they may see. hiddenIds: hidden combatants the GM keeps back.
+// Exported for the player view of the log window, so the window and the reports name everybody alike.
+export function participantDirectory(log, share, markNames = false) {
   const participants = new Map();
   const hiddenIds = new Set();
   let enemyIndex = 0;
@@ -304,8 +317,7 @@ function participantDirectory(log, share, markNames = false) {
 }
 
 function publicEnemyName(participant, share, nextEnemyIndex) {
-  const anonymize = Boolean(share.anonymizeEnemies) && share.includeNpcNames !== true;
-  if (!anonymize && participant.name) return participant.name;
+  if (!enemyNamesHidden(share) && participant.name) return participant.name;
   return format("SCLS.Report.EnemyName", { index: nextEnemyIndex() });
 }
 
@@ -329,11 +341,17 @@ function shareableEvents(log, share, hiddenIds) {
   return { events, privateRollIds };
 }
 
-function isPrivateEvent(event) {
+// GM notes, markers, share and export records, system warnings and chat messages.
+export function isBookkeepingEvent(event) {
+  return NON_REPORT_TYPES.has(event?.type);
+}
+
+// A whispered chat card or roll. Changes read from the game state are seen by everyone and are never private.
+export function isPrivateEvent(event) {
   return event.visibility === VISIBILITY.GM && !OBSERVED_SOURCE_KINDS.has(event.source?.kind);
 }
 
-function involvesHidden(event, hiddenIds) {
+export function involvesHidden(event, hiddenIds) {
   if (!hiddenIds.size) return false;
   const targets = Array.isArray(event.data?.targetCombatantIds) ? event.data.targetCombatantIds : [];
   return [event.combatantId, event.data?.sourceCombatantId, event.data?.targetCombatantId, ...targets].some((id) => id && hiddenIds.has(String(id)));

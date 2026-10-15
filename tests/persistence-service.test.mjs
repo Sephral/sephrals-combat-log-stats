@@ -6,6 +6,7 @@ let storedIndex = null;
 let retentionDays = 0;
 
 globalThis.game = {
+  user: { id: "gm", isGM: true },
   release: { generation: 14 },
   version: "14.361",
   world: { id: "test-world" },
@@ -493,4 +494,42 @@ test("logs written by another GM are read again after invalidation", async () =>
 
   service.invalidate();
   assert.deepEqual((await service.loadActiveLogs()).map((log) => log.id), ["running"]);
+});
+
+test("players read logs but never write, delete or prune them", async () => {
+  const oldDate = new Date(Date.now() - (30 * 24 * 60 * 60 * 1000)).toISOString();
+  const initial = { schemaVersion: 1, logs: [{ combatLogId: "old", inlineLog: { id: "old", status: LOG_STATUS.ENDED, title: "Old", endedAt: oldDate, startedAt: oldDate, events: [], participants: [], computed: { summary: { rounds: 1 } } } }] };
+  storedIndex = structuredClone(initial);
+  retentionDays = 7;
+  let uploads = 0;
+  globalThis.FilePicker = { upload: async () => { uploads += 1; return { path: "x" }; } };
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  game.user.isGM = false;
+  try {
+    const service = new CombatLogPersistenceService();
+    assert.equal((await service.loadLog("old"))?.title, "Old");
+    // Retention leaves the old log out of the player's list but keeps it stored.
+    assert.deepEqual(await service.loadHistoryEntries(), []);
+    assert.equal(await service.saveLog({ id: "new", title: "New", status: LOG_STATUS.ENDED, events: [], participants: [] }), null);
+    assert.equal(await service.deleteLog("old"), false);
+    assert.equal(await service.saveIndex({ logs: [] }), null);
+    assert.equal(await service.saveStore({ logs: [] }), false);
+  } finally {
+    game.user.isGM = true;
+    console.warn = originalWarn;
+    retentionDays = 0;
+  }
+  assert.deepEqual(storedIndex, initial);
+  assert.equal(uploads, 0);
+});
+
+test("every saved index carries the time of the save, so other clients hear about any change", async () => {
+  storedIndex = { schemaVersion: 1, logs: [] };
+  const service = new CombatLogPersistenceService();
+  await service.saveIndex({ logs: [{ combatLogId: "a" }] });
+  const first = storedIndex.savedAt;
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await service.saveIndex({ logs: [{ combatLogId: "a" }] });
+  assert.ok(first && storedIndex.savedAt && storedIndex.savedAt !== first, JSON.stringify(storedIndex));
 });

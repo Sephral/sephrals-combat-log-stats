@@ -1,6 +1,6 @@
 import { LOG_STATUS, MODULE_ID, SCHEMA_VERSION, SETTINGS } from "../constants.js";
 import { getSetting, setSetting } from "../settings.js";
-import { cloneData, debugLog, isoNow } from "../utils.js";
+import { cloneData, debugLog, isGM, isoNow } from "../utils.js";
 
 const FILE_UPLOAD_TIMEOUT_MS = 10000;
 const STORE_FILE_NAME = "combat-logs.json";
@@ -50,8 +50,12 @@ export class CombatLogPersistenceService {
     return { schemaVersion: SCHEMA_VERSION, logs: storeEntries };
   }
 
+  // Players read the logs only. Every write below refuses them, whatever calls it.
   async saveIndex(index) {
-    return setSetting(SETTINGS.INDEX, { schemaVersion: SCHEMA_VERSION, logs: (index.logs ?? []).map(stripLogPayloadFromIndexEntry) });
+    if (refusePlayer("save the combat log index")) return null;
+    // The time of the save changes the setting on every write, so other clients (players with an open window)
+    // also hear about changes the index entries do not show, such as new sharing choices.
+    return setSetting(SETTINGS.INDEX, { schemaVersion: SCHEMA_VERSION, savedAt: isoNow(), logs: (index.logs ?? []).map(stripLogPayloadFromIndexEntry) });
   }
 
   async loadStore() {
@@ -64,6 +68,7 @@ export class CombatLogPersistenceService {
   }
 
   async saveStore(store) {
+    if (refusePlayer("save combat logs")) return false;
     const normalized = normalizeStore({ ...store, updatedAt: isoNow() });
     this.storeCache = cloneData(normalized);
     const persistedToFile = await this.tryPersistStoreToFile(normalized);
@@ -73,6 +78,7 @@ export class CombatLogPersistenceService {
   }
 
   async saveLog(log) {
+    if (refusePlayer("save combat logs")) return null;
     return this.enqueueWrite(async () => {
       const savedLog = cloneData(log);
       this.cache.set(savedLog.id, savedLog);
@@ -86,6 +92,7 @@ export class CombatLogPersistenceService {
   }
 
   async deleteLog(logId) {
+    if (refusePlayer("delete combat logs")) return false;
     return this.enqueueWrite(async () => {
       if (!logId) return false;
       const store = await this.loadStore();
@@ -270,6 +277,8 @@ export class CombatLogPersistenceService {
     }
     if (retained.length !== (index.logs ?? []).length) {
       const pruned = { ...index, logs: retained };
+      // A player only leaves the old logs out of the list. The next GM to open the history removes them.
+      if (!isGM()) return pruned;
       // saveStore rewrites the index setting itself (file path and URL, or inline payloads). Writing the
       // display entries afterwards would drop the stored Forge URL and the inline payloads.
       if (removedIds.size && this.storeCache) {
@@ -283,6 +292,12 @@ export class CombatLogPersistenceService {
     return index;
   }
 
+}
+
+function refusePlayer(action) {
+  if (isGM()) return false;
+  console.warn(`${MODULE_ID} | Only a GM can ${action}.`);
+  return true;
 }
 
 function withTimeout(promise, timeoutMs, message) {

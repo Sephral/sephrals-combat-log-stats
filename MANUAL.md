@@ -14,6 +14,8 @@ The window has the tabs Summary, Round Log, Statistics, Impact Meter, Correction
 
 Only one GM records at a time. With a second GM or an assistant logged in, nothing is recorded twice. When the recording GM leaves, the next GM continues the running logs.
 
+Players can open the same window too, read only. See [What players see](#what-players-see).
+
 ## What is tracked
 
 * **Hit points:** every change of hit points, temporary hit points and maximum hit points of a combatant. A change to 0 hit points counts as downed.
@@ -93,6 +95,32 @@ The preview in the Sharing tab shows the report as players will see it. It follo
 
 With *Post player report when combat ends* or *Create journal report when combat ends* turned on, every ended combat is shared automatically with its own sharing choices or the defaults from the module settings.
 
+## What players see
+
+With *Players can view combat statistics* turned on (the default), players get the chart icon in the token controls and the button in the combat tracker as well. They open the window read only: nothing they click changes, shares or exports a combat. When the GM turns the setting off, the icon and the button disappear for players right away and an open window closes. Players who try to open it get a note that the GM turned it off.
+
+| Tab | What players see |
+| --- | --- |
+| History | every recorded fight with its rounds, the combatants they may see, party damage and party damage per round. No delete button |
+| Summary | the key numbers and the awards, without the count of corrections and without the GM hints |
+| Round Log | the actions round by round, only when the report detail of the fight is *Full recap* or *Public report*. Open action cards and manual changes of the GM are left out, they only count in the numbers |
+| Statistics | both charts, the discipline mix, the top actions and the side table |
+| Impact Meter | the ranking. Sorting changes only their own view |
+| Participants | the combatants with their side as plain text |
+
+Corrections and Sharing stay with the GM, and so do renaming, deleting, the manual changes, the exports and the debug log.
+
+Every fight follows its own sharing choices from the Sharing tab, the same way as a player report of that fight. A fight the GM never changed there uses the defaults from the module settings.
+
+* **Hidden combatants** are left out, with everything they did and everything done to them, unless the fight includes hidden combatants.
+* **Enemy names:** with *Hide enemy names* the enemies are called Enemy 1, Enemy 2 and so on, in the same order as in the report, and show no portrait.
+* **Enemy numbers:** without *Show enemy numbers*, or with a report detail that shares no enemy numbers, players see no enemy rows, no enemy columns in the damage per round chart, no enemy DPR, no healing of enemies and no enemy actions among the top actions. The totals then show the damage and healing of the party.
+* **Never shown:** GM notes, whispered rolls and cards, unclear hit point changes, entries the GM ignored and open action cards. Damage or healing applied from a whispered card still counts, because every player sees the hit points change, but the name of the action stays hidden.
+
+The numbers players see are computed from what they may see. Damage the party dealt to a hidden combatant, for example, is not part of their totals.
+
+A running fight shows up as the recording GM last saved it and follows every save, usually within a second. When it ends, it stays selected in the window.
+
 ## Export
 
 The Sharing tab also exports the selected combat for the GM:
@@ -116,6 +144,7 @@ Excel with German regional settings expects semicolons in CSV files. Import the 
 | Include unclear HP changes | world | Count unclear hit point changes before the GM checks them |
 | Damage per round basis | world | Applied net, applied gross or rolled damage |
 | Allow player reports | world | Allow chat and journal reports for players |
+| Players can view combat statistics | world | Players open the window read only, on by default. See [What players see](#what-players-see) |
 | Default report detail | world | Detail level preselected for new combats |
 | Hide enemy names by default | world | Reports call enemies Enemy 1, Enemy 2 and so on |
 | Post player report when combat ends | world | Post the report to chat automatically |

@@ -733,3 +733,33 @@ test("an updateCombatant initiative roll (dnd5e, core) still updates the partici
   await service.combatantUpdated(hero, { initiative: 14 });
   assert.equal(log.participants[0].initiative, 14);
 });
+
+test("players cannot save, delete or correct logs through the service", async () => {
+  const service = new CombatLogService();
+  const writes = [];
+  service.persistence.saveLog = async (log) => writes.push(["save", log.id]);
+  service.persistence.deleteLog = async (id) => writes.push(["delete", id]);
+  const log = {
+    id: "player-log",
+    participants: [{ combatantId: "hero", name: "Hero", side: "friendly" }, { combatantId: "foe", name: "Foe", side: "hostile" }],
+    sessionSegments: [],
+    events: [{ id: "delta", type: EVENT_TYPES.RESOURCE_DELTA, combatantId: "foe", confidence: CONFIDENCE.UNCLEAR, data: { delta: -3, interpretedAs: RESOURCE_INTERPRETATIONS.DAMAGE } }]
+  };
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  game.user.isGM = false;
+  try {
+    assert.equal(await service.saveAndCompute(log, { immediate: true }), log);
+    assert.equal(service.pendingSaves.size, 0);
+    assert.equal(await service.deleteLog("player-log"), false);
+    assert.equal(service.addManualAdjustment(log, { type: EVENT_TYPES.DAMAGE_MANUAL_ADDED, amount: 5, sourceCombatantId: "hero", targetCombatantId: "foe" }), null);
+    assert.equal(service.setEventSource(log, "delta", "hero"), null);
+    assert.equal(service.stashPendingSaves(), false);
+  } finally {
+    game.user.isGM = true;
+    console.warn = originalWarn;
+  }
+  assert.deepEqual(writes, []);
+  assert.equal(log.events.length, 1);
+  assert.equal(log.events[0].data.sourceCombatantId, undefined);
+});

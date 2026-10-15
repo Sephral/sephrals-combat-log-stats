@@ -2,7 +2,7 @@ import { getSystemAdapter } from "../adapters/adapter-registry.js";
 import { ACTION_STATUS, CONFIDENCE, EVENT_TYPES, HOOKS, LOG_STATUS, MODULE_ID, RESOURCE_INTERPRETATIONS, SEGMENT_REASONS, SETTINGS, SHARE_MODES, SIDES, SOURCE_KINDS } from "../constants.js";
 import { closeCurrentSegment, createCombatLog, createSessionSegment, snapshotParticipant } from "../models/combat-log.js";
 import { getSetting } from "../settings.js";
-import { cloneData, debugLog, getProperty, isoNow, isTrackingGM } from "../utils.js";
+import { cloneData, debugLog, getProperty, isGM, isoNow, isTrackingGM } from "../utils.js";
 import { CombatEventLedger } from "./event-ledger.js";
 import { isResourceDelta } from "./event-insights.js";
 import { CombatLogPersistenceService } from "./persistence-service.js";
@@ -1054,6 +1054,7 @@ export class CombatLogService {
 
   // GM corrections from the log window.
   setEventSource(log, eventId, sourceCombatantId) {
+    if (!isGM()) return null;
     const event = (log?.events ?? []).find((entry) => entry.id === eventId);
     if (!event) return null;
     const target = event.data?.targetCombatantId || (event.data?.attribution ? "" : event.combatantId) || "";
@@ -1075,6 +1076,7 @@ export class CombatLogService {
   }
 
   addManualAdjustment(log, { type, amount, sourceCombatantId = "", targetCombatantId = "", note = "" } = {}) {
+    if (!isGM()) return null;
     const allowed = [EVENT_TYPES.DAMAGE_MANUAL_ADDED, EVENT_TYPES.DAMAGE_MANUAL_REDUCED, EVENT_TYPES.HEALING_MANUAL_ADDED, EVENT_TYPES.HEALING_MANUAL_REDUCED];
     const value = Math.abs(Number(amount) || 0);
     if (!log || !allowed.includes(type) || !value) return null;
@@ -1095,8 +1097,13 @@ export class CombatLogService {
   }
 
   // Computes the stats right away and writes the store shortly after; bursts of events share one write.
+  // Players never save: their window only reads logs (see player-view-service.js).
   async saveAndCompute(log, { immediate = false } = {}) {
     log.computed = CombatStatsService.compute(log, this.statsOptions());
+    if (!isGM()) {
+      console.warn(`${MODULE_ID} | Only a GM can save combat logs.`);
+      return log;
+    }
     if (log?.combatId && this.activeLogs.get(log.combatId)?.id === log.id) this.activeLogs.set(log.combatId, log);
     this.pendingSaves.set(log.id, log);
     if (immediate || this.persistDelayMs <= 0) await this.flushPendingSaves();
@@ -1134,6 +1141,7 @@ export class CombatLogService {
   // A write cannot finish while the page unloads (reload, closed tab). The logs still waiting go to the browser's
   // storage, synchronously, and the next start of this GM writes them (restoreStashedLogs).
   stashPendingSaves() {
+    if (!isGM()) return false;
     const logs = new Map([...this.savingLogs, ...this.pendingSaves]);
     if (!logs.size) return false;
     try {
@@ -1181,6 +1189,10 @@ export class CombatLogService {
 
   async deleteLog(logId) {
     if (!logId) return false;
+    if (!isGM()) {
+      console.warn(`${MODULE_ID} | Only a GM can delete combat logs.`);
+      return false;
+    }
     for (const [combatId, log] of this.activeLogs.entries()) {
       if (log.id === logId) this.activeLogs.delete(combatId);
     }

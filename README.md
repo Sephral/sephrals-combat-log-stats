@@ -18,6 +18,7 @@
 * **Charts at a glance:** damage per round for the party and the enemies, and damage dealt, taken and healed for every combatant.
 * **Awards for the table:** MVP, Best Healer, Damage Sponge, Clutch Save, Lucky Dice and more, in the summary and in the player report.
 * **Recaps for the whole table:** share a report in chat, as a journal entry or straight into Discord. Pick sections such as Hero Moments, Close Calls, Damage Spotlight or Tactical Turning Points and check the live preview before anyone else sees it.
+* **Players can look too:** your players open the same window read only, with the sharing choices you made for each fight. One switch in the settings turns it off.
 * **Your secrets stay secret:** hide enemy names, hidden combatants and enemy numbers. GM notes and private rolls never appear in a report.
 * **You have the last word:** anything the log could not explain waits in the Corrections tab, and you can add or reduce damage and healing by hand.
 * **Take your data with you:** export a fight as JSON, as a readable Markdown document or as a CSV table for your spreadsheet.

@@ -877,6 +877,19 @@
   color: var(--scls-accent);
 }
 
+/* Player view: the title as text and a read only badge instead of the rename form. */
+.scls-meta-line .scls-readonly-badge {
+  border-color: var(--scls-border);
+  color: var(--scls-muted);
+}
+
+.scls-title-block .scls-title-text {
+  margin: 0 0 0.2rem;
+  border: none;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
 .scls-cell-note {
   display: block;
   color: var(--scls-muted);
