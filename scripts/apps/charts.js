@@ -5,7 +5,9 @@ import { escapeHtml, format, localize } from "../utils.js";
 
 // minWidth: a short fight gets wider round groups instead of a zoomed in chart, so both charts share one text size.
 const ROUND_CHART = Object.freeze({ height: 190, top: 14, bottom: 26, left: 44, right: 10, group: 36, bar: 13, gap: 2, minWidth: 420 });
-const COMBATANT_CHART = Object.freeze({ width: 560, label: 132, right: 46, row: 30, bar: 6, gap: 2, top: 6, bottom: 22 });
+// The combatant chart shares the round chart's width and minimum height: side by side, both boxes then scale their
+// text alike and the bars fill the box instead of a flat strip. Few combatants get thicker bars, many get more rows.
+const COMBATANT_CHART = Object.freeze({ width: ROUND_CHART.minWidth, height: ROUND_CHART.height, label: 104, right: 40, minRow: 40, minBar: 9, maxBar: 18, gap: 2, padding: 8, top: 6, bottom: 22, nameLength: 16 });
 const MAX_COMBATANTS = 12;
 
 // Party and enemy damage per round as grouped columns. rows: computed.byRound.
@@ -52,35 +54,46 @@ export function combatantBarChart(rows = [], { formatValue = String } = {}) {
     .sort((leftRow, rightRow) => (measures[0].value(rightRow) - measures[0].value(leftRow)) || (measures[2].value(rightRow) - measures[2].value(leftRow)))
     .slice(0, MAX_COMBATANTS);
   if (!data.length) return "";
-  const { width, label: labelWidth, right, row: rowHeight, bar, gap, top, bottom } = COMBATANT_CHART;
+  const { width, label: labelWidth, right, gap, top, bottom } = COMBATANT_CHART;
+  const { rowHeight, bar } = combatantRows(data.length);
   const height = top + bottom + (data.length * rowHeight);
   const plot = width - labelWidth - right;
   const max = niceMax(Math.max(...data.flatMap((row) => measures.map((measure) => measure.value(row)))));
   const x = (value) => labelWidth + (plot * value / max);
   const parts = [];
   for (const tick of [0, max / 2, max]) {
-    parts.push(`<line class="scls-chart__grid" x1="${fixed(x(tick))}" x2="${fixed(x(tick))}" y1="${top}" y2="${height - bottom}"></line>`);
-    parts.push(`<text class="scls-chart__axis" x="${fixed(x(tick))}" y="${height - 6}" text-anchor="middle">${escapeHtml(formatValue(round(tick)))}</text>`);
+    parts.push(`<line class="scls-chart__grid" x1="${fixed(x(tick))}" x2="${fixed(x(tick))}" y1="${top}" y2="${fixed(height - bottom)}"></line>`);
+    parts.push(`<text class="scls-chart__axis" x="${fixed(x(tick))}" y="${fixed(height - 8)}" text-anchor="middle">${escapeHtml(formatValue(round(tick)))}</text>`);
   }
   data.forEach((row, index) => {
     const band = top + (index * rowHeight);
     const name = String(row.name ?? "");
-    parts.push(`<text class="scls-chart__label" x="${labelWidth - 8}" y="${fixed(band + (rowHeight / 2) + 4)}" text-anchor="end"><title>${escapeHtml(name)}</title>${escapeHtml(shorten(name, 18))}</text>`);
+    parts.push(`<text class="scls-chart__label" x="${labelWidth - 6}" y="${fixed(band + (rowHeight / 2))}" dominant-baseline="central" text-anchor="end"><title>${escapeHtml(name)}</title>${escapeHtml(shorten(name, COMBATANT_CHART.nameLength))}</text>`);
     const first = band + ((rowHeight - (3 * bar) - (2 * gap)) / 2);
     measures.forEach((measure, position) => {
       const value = measure.value(row);
       const barY = first + (position * (bar + gap));
       const tooltip = format("SCLS.Chart.CombatantTooltip", { name, measure: measure.label, amount: formatValue(value) });
       parts.push(barRect({ x: labelWidth, y: barY, width: Math.max(0, x(value) - labelWidth), height: bar, tone: measure.key, tooltip }));
-      if (value > 0) parts.push(`<text class="scls-chart__value" x="${fixed(x(value) + 4)}" y="${fixed(barY + bar - 0.5)}">${escapeHtml(formatValue(value))}</text>`);
+      if (value > 0) parts.push(`<text class="scls-chart__value" x="${fixed(x(value) + 3)}" y="${fixed(barY + (bar / 2))}" dominant-baseline="central">${escapeHtml(formatValue(value))}</text>`);
     });
   });
   const label = format(data.length === 1 ? "SCLS.Chart.CombatantSummaryOne" : "SCLS.Chart.CombatantSummary", { count: formatValue(data.length) });
-  return svg({ width, height, label, body: parts.join("") });
+  return svg({ width, height, label, body: parts.join(""), modifier: "bars" });
 }
 
-function svg({ width, height, label, body }) {
-  return `<svg class="scls-chart__svg" viewBox="0 0 ${fixed(width)} ${fixed(height)}" role="img" aria-label="${escapeHtml(label)}" preserveAspectRatio="xMinYMin meet"><title>${escapeHtml(label)}</title>${body}</svg>`;
+// Row height and bar thickness for count combatants: the rows fill at least the round chart's plot height, the
+// bars grow with the row up to maxBar and never get thinner than minBar, so value labels stay apart.
+export function combatantRows(count) {
+  const { height, top, bottom, minRow, minBar, maxBar, gap, padding } = COMBATANT_CHART;
+  const rows = Math.max(1, Number(count) || 1);
+  const rowHeight = Math.max(minRow, (height - top - bottom) / rows);
+  const bar = Math.min(maxBar, Math.max(minBar, (rowHeight - padding - (2 * gap)) / 3));
+  return { rowHeight, bar };
+}
+
+function svg({ width, height, label, body, modifier = "" }) {
+  return `<svg class="scls-chart__svg${modifier ? ` scls-chart__svg--${modifier}` : ""}" viewBox="0 0 ${fixed(width)} ${fixed(height)}" role="img" aria-label="${escapeHtml(label)}" preserveAspectRatio="xMinYMin meet"><title>${escapeHtml(label)}</title>${body}</svg>`;
 }
 
 function barRect({ x, y, width, height, tone, tooltip }) {

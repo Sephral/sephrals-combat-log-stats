@@ -12,7 +12,7 @@
 
 * **Records itself:** start a combat as usual and the log runs in the background, round by round. A reload does not stop it.
 * **Every number that matters:** damage dealt and taken, healing, takedowns, times downed, critical hits, fumbles, control plays and damage per round for every combatant.
-* **Credit where credit is due:** in D&D 5e every hit and every heal applied from a chat card goes to the combatant who rolled it, overkill included. In other systems the module matches hit point changes to the rolls behind them.
+* **Credit where credit is due:** in D&D 5e every hit and every heal applied from a chat card goes to the combatant who rolled it, overkill included, also when Midi-QOL applies the damage. In other systems the module matches hit point changes to the rolls behind them.
 * **Made for Crucible too:** health, wounds, morale and madness, heroes who end up Weakened, Broken or Dead, and every action card you confirm credited to the one who used it.
 * **Impact Meter:** a sortable ranking of the fight. Who dealt the most damage, who kept the party alive, who locked down the enemies.
 * **Charts at a glance:** damage per round for the party and the enemies, and damage dealt, taken and healed for every combatant.

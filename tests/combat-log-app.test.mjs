@@ -509,3 +509,79 @@ test("Crucible corrections offer no temporary or maximum hit point choices and u
   assert.equal(termKey("crucible", "SCLS.Label.AutomaticCorrections"), "SCLS.Crucible.Label.AutomaticCorrections");
   assert.equal(termKey("dnd5e", "SCLS.Label.AutomaticCorrections"), "SCLS.Label.AutomaticCorrections");
 });
+
+test("the Sharing form hides empty sections and options without anyone to apply to, but keeps their values", () => {
+  const log = sharingLog();
+  log.shareSettings = { ...log.shareSettings, shareMode: "fullVisibleRecap", reportSections: { spellwork: true, healingSupport: false } };
+  const options = __test__.reportSectionOptions(log);
+  const option = (key) => options.find((entry) => entry.value === key);
+  assert.equal(option("martialHighlights").available, true);
+  // No spell, no healing in this fight: hidden, the stored choice stays as it was.
+  assert.deepEqual([option("spellwork").available, option("spellwork").selected], [false, true]);
+  assert.deepEqual([option("healingSupport").available, option("healingSupport").selected], [false, false]);
+
+  const sharing = __test__.sharingContext(log, { canShare: () => true });
+  assert.equal(sharing.showHiddenOption, true);
+  assert.equal(sharing.showEnemyOptions, true);
+  const friendsOnly = { ...log, participants: log.participants.filter((entry) => entry.side === SIDES.FRIENDLY && !entry.hidden) };
+  const quiet = __test__.sharingContext(friendsOnly, { canShare: () => true });
+  assert.equal(quiet.showHiddenOption, false);
+  assert.equal(quiet.showEnemyOptions, false);
+
+  // Hidden checkboxes are still part of the form data, so saving keeps them.
+  const form = sharingForm({ sections: ["combatRecap", "spellwork"] });
+  assert.equal(__test__.reportSettingsFromForm(log, form).reportSections.spellwork, true);
+
+  // Live update: labels of sections without content are hidden, the fieldset too when nothing is left.
+  const labels = ["combatRecap", "spellwork"].map((key) => ({ dataset: { sclsReportSection: key }, hidden: false }));
+  const fieldset = { hidden: false };
+  const fakeForm = { querySelectorAll: () => labels, querySelector: () => fieldset };
+  __test__.showReportSections(fakeForm, new Set(["combatRecap"]));
+  assert.deepEqual(labels.map((label) => label.hidden), [false, true]);
+  assert.equal(fieldset.hidden, false);
+  __test__.showReportSections(fakeForm, new Set());
+  assert.equal(fieldset.hidden, true);
+  __test__.showReportSections(fakeForm, new Set(["spellwork"]));
+  assert.deepEqual([labels[1].hidden, fieldset.hidden], [false, false]);
+});
+
+test("the tabs drop their labels only when they do not fit in one row", () => {
+  const nav = (fullWidth, clientWidth) => {
+    const classes = new Set(["scls-tabs"]);
+    return {
+      classes,
+      clientWidth,
+      // Without labels the tabs need about half the room.
+      get scrollWidth() { return classes.has("scls-tabs--compact") ? fullWidth / 2 : fullWidth; },
+      classList: { remove: (name) => classes.delete(name), toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) }
+    };
+  };
+  const wide = nav(1000, 1100);
+  assert.equal(__test__.fitTabs(wide), false);
+  assert.equal(wide.classes.has("scls-tabs--compact"), false);
+  const narrow = nav(1000, 800);
+  assert.equal(__test__.fitTabs(narrow), true);
+  assert.equal(narrow.classes.has("scls-tabs--compact"), true);
+  // Measured with labels again: a wider window brings them back.
+  narrow.clientWidth = 1050;
+  assert.equal(__test__.fitTabs(narrow), false);
+  assert.equal(narrow.classes.has("scls-tabs--compact"), false);
+  assert.equal(__test__.fitTabs(null), false);
+});
+
+test("combat round totals follow the statistics, so damage without a known source counts like in the chart", () => {
+  const result = __test__.combatRounds({
+    participants: [
+      { combatantId: "hero", name: "Hero", side: SIDES.FRIENDLY },
+      { combatantId: "foe", name: "Foe", side: SIDES.HOSTILE }
+    ],
+    computed: { summary: { rounds: 1 }, byRound: [{ round: 1, partyDamage: 11, enemyDamage: 0, partyHealing: 0, enemyHealing: 0 }] },
+    events: [
+      { id: "hit", type: EVENT_TYPES.DAMAGE_APPLIED, round: 1, combatantId: "hero", confidence: CONFIDENCE.SAFE, data: { amount: 7, targetCombatantId: "foe" } },
+      { id: "unknown", type: "resource.delta", round: 1, combatantId: "foe", confidence: CONFIDENCE.LIKELY, data: { amount: 4, interpretedAs: "damage" } }
+    ]
+  });
+  assert.equal(result[0].heroDamage, 11);
+  assert.equal(result[0].foeDamage, 0);
+  assert.match(result[0].summary, /11/);
+});

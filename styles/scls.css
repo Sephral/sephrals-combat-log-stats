@@ -124,21 +124,48 @@
   font-size: 0.85rem;
 }
 
+/* The tabs stay in one row. When the labels do not fit, the window sets .scls-tabs--compact and the tabs show
+   their icons only, the label stays as the tooltip (title). */
 .scls-tabs {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   border-bottom: 1px solid var(--scls-border);
   padding-bottom: 0.5rem;
 }
 
 .scls-tab-group {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 0.5rem;
 }
 
 .scls-tab-group--details {
-  flex: 1 1 34rem;
+  flex: 1 1 auto;
+}
+
+.scls-tabs button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.scls-tabs--compact .scls-tab-group button > span,
+.scls-tabs--compact .scls-tab-connector > span {
+  display: none;
+}
+
+.scls-tabs--compact .scls-tab-group {
+  gap: 0.35rem;
+}
+
+.scls-tabs--compact .scls-tab-group button {
+  min-width: 2.35rem;
+  padding-inline: 0.55rem;
+}
+
+/* Last resort for a very narrow window: the icons wrap instead of leaving the window. */
+.scls-tabs--compact,
+.scls-tabs--compact .scls-tab-group {
+  flex-wrap: wrap;
 }
 
 .scls-tab-connector {
@@ -732,6 +759,12 @@
   min-height: 2rem;
 }
 
+/* Share options and report sections without content for this fight stay in the form (their stored value is
+   saved with it) but are not shown. */
+.scls-share-form [hidden] {
+  display: none !important;
+}
+
 .scls-report-sections {
   display: grid;
   grid-column: 1 / -1;
@@ -1108,6 +1141,11 @@ p.scls-share-status.is-shared {
   height: auto;
   max-height: 22rem;
   overflow: visible;
+}
+
+/* The combatant chart grows a row per combatant. Capping its height would shrink it into a corner of the box. */
+.scls-chart__svg--bars {
+  max-height: none;
 }
 
 .scls-chart__grid {

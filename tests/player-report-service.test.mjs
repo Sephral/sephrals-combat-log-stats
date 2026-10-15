@@ -22,7 +22,7 @@ globalThis.game = {
   settings: { get: () => undefined }
 };
 
-const { PlayerReportService, __test__ } = await import("../scripts/services/player-report-service.js");
+const { PlayerReportService, reportSectionsWithContent, shareOptionAvailability, __test__ } = await import("../scripts/services/player-report-service.js");
 
 const ALL_SECTIONS = Object.freeze({
   combatRecap: true,
@@ -606,4 +606,46 @@ test("an undone Crucible hit is no hit in the report and its card's critical is 
   const markdown = markdownFor(log);
   assert.doesNotMatch(markdown, /Longbow/);
   assert.doesNotMatch(section(markdown, "Party Contributions") ?? "", /Controller:[^\n]*ranged hit/);
+});
+
+test("the Sharing form offers only sections with content for the log and the chosen settings", () => {
+  const smallFight = () => ({
+    participants: [
+      { combatantId: "hero", name: "Hero", side: SIDES.FRIENDLY, isPlayerOwned: true },
+      { combatantId: "gob", name: "Goblin", side: SIDES.HOSTILE },
+      { combatantId: "mage", name: "Mage", side: SIDES.FRIENDLY, hidden: true }
+    ],
+    computed: { summary: { rounds: 1 } },
+    events: [
+      { id: "hit", type: EVENT_TYPES.DAMAGE_APPLIED, round: 1, combatantId: "hero", confidence: CONFIDENCE.SAFE, visibility: VISIBILITY.PUBLIC, data: { amount: 7, actionName: "Longsword", actionKind: "melee", targetCombatantId: "gob" } },
+      { id: "bolt", type: EVENT_TYPES.DAMAGE_APPLIED, round: 1, combatantId: "mage", confidence: CONFIDENCE.SAFE, visibility: VISIBILITY.PUBLIC, data: { amount: 5, actionName: "Fire Bolt", actionKind: "spell", targetCombatantId: "gob" } }
+    ],
+    shareSettings: {}
+  });
+  const recap = { shareMode: SHARE_MODES.FULL_VISIBLE_RECAP };
+
+  const offered = reportSectionsWithContent(smallFight(), recap);
+  for (const key of ["combatRecap", "partyContributions", "martialHighlights", "damageSpotlight", "aftermath"]) assert.ok(offered.has(key), key);
+  // Nobody healed, controlled, dropped or was saved, and the only spell came from a hidden combatant.
+  for (const key of ["spellwork", "healingSupport", "controlPlays", "closeCalls", "supportSaves", "enemyPressure"]) assert.equal(offered.has(key), false, key);
+
+  // The selection does not matter, the share settings do.
+  assert.deepEqual([...reportSectionsWithContent(smallFight(), { ...recap, reportSections: {} })], [...offered]);
+  assert.ok(reportSectionsWithContent(smallFight(), { ...recap, includeHiddenCombatants: true }).has("spellwork"));
+  const summaryOnly = reportSectionsWithContent(smallFight(), { shareMode: SHARE_MODES.SUMMARY_ONLY });
+  assert.equal(summaryOnly.has("martialHighlights"), false);
+  assert.equal(summaryOnly.has("damageSpotlight"), false);
+
+  // The full sample fight fills every section, enemy pressure only with enemy stats.
+  const full = reportSectionsWithContent(reportLog(), reportLog().shareSettings);
+  for (const key of Object.keys(ALL_SECTIONS).filter((key) => key !== "awards")) assert.ok(full.has(key), key);
+  assert.equal(reportSectionsWithContent(reportLog(), { ...reportLog().shareSettings, includeEnemyStats: false }).has("enemyPressure"), false);
+  assert.deepEqual([...reportSectionsWithContent({ participants: [], events: [] }, recap)].filter((key) => key !== "combatRecap"), []);
+});
+
+test("share options are offered only when there are hidden combatants or enemies to apply to", () => {
+  assert.deepEqual(shareOptionAvailability(reportLog()), { hiddenCombatants: true, enemies: true });
+  assert.deepEqual(shareOptionAvailability({ participants: [{ combatantId: "hero", side: SIDES.FRIENDLY }, { combatantId: "dog", side: SIDES.NEUTRAL }] }), { hiddenCombatants: false, enemies: false });
+  assert.deepEqual(shareOptionAvailability({ participants: [{ combatantId: "ghost", side: SIDES.FRIENDLY, hidden: true }] }), { hiddenCombatants: true, enemies: false });
+  assert.deepEqual(shareOptionAvailability(null), { hiddenCombatants: false, enemies: false });
 });

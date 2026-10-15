@@ -384,14 +384,14 @@
           <label><span>{{sclsLocalize "SCLS.Share.Mode"}}</span>
             <select name="shareMode">{{#each sharing.modeOptions}}<option value="{{this.value}}" {{#if this.selected}}selected{{/if}}>{{this.label}}</option>{{/each}}</select>
           </label>
-          <label class="scls-checkbox"><input type="checkbox" name="includeEnemyStats" {{#if sharing.includeEnemyStats}}checked{{/if}}> {{sclsLocalize "SCLS.Share.IncludeEnemyStats"}}</label>
-          <label class="scls-checkbox"><input type="checkbox" name="anonymizeEnemies" {{#if sharing.anonymizeEnemies}}checked{{/if}}> {{sclsLocalize "SCLS.Share.AnonymizeEnemies"}}</label>
-          <label class="scls-checkbox"><input type="checkbox" name="includeHiddenCombatants" {{#if sharing.includeHiddenCombatants}}checked{{/if}}> {{sclsLocalize "SCLS.Share.IncludeHidden"}}</label>
+          <label class="scls-checkbox" {{#unless sharing.showEnemyOptions}}hidden{{/unless}}><input type="checkbox" name="includeEnemyStats" {{#if sharing.includeEnemyStats}}checked{{/if}}> {{sclsLocalize "SCLS.Share.IncludeEnemyStats"}}</label>
+          <label class="scls-checkbox" {{#unless sharing.showEnemyOptions}}hidden{{/unless}}><input type="checkbox" name="anonymizeEnemies" {{#if sharing.anonymizeEnemies}}checked{{/if}}> {{sclsLocalize "SCLS.Share.AnonymizeEnemies"}}</label>
+          <label class="scls-checkbox" {{#unless sharing.showHiddenOption}}hidden{{/unless}}><input type="checkbox" name="includeHiddenCombatants" {{#if sharing.includeHiddenCombatants}}checked{{/if}}> {{sclsLocalize "SCLS.Share.IncludeHidden"}}</label>
         </div>
-        <fieldset class="scls-report-sections">
+        <fieldset class="scls-report-sections" {{#unless hasReportSections}}hidden{{/unless}}>
           <legend>{{sclsLocalize "SCLS.Share.ReportSections"}}</legend>
           {{#each reportSectionOptions}}
-          <label><input type="checkbox" name="reportSections" value="{{this.value}}" {{#if this.selected}}checked{{/if}}> {{this.label}}</label>
+          <label data-scls-report-section="{{this.value}}" {{#unless this.available}}hidden{{/unless}}><input type="checkbox" name="reportSections" value="{{this.value}}" {{#if this.selected}}checked{{/if}}> {{this.label}}</label>
           {{/each}}
         </fieldset>
         <div class="scls-share-actions">

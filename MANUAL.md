@@ -10,7 +10,7 @@ This manual covers the details. For a quick overview see the [README](README.md)
 4. When you end the combat, the summary opens (can be turned off).
 5. Check the Corrections tab for hit point changes the log could not explain, then share a report from the Sharing tab.
 
-The window has the tabs Summary, Round Log, Statistics, Impact Meter, Corrections, Participants, History and Sharing.
+The window has the tabs Summary, Round Log, Statistics, Impact Meter, Corrections, Participants, History and Sharing. In a narrow window the tabs show their icons only. Point at an icon to see the name of its tab.
 
 Only one GM records at a time. With a second GM or an assistant logged in, nothing is recorded twice. When the recording GM leaves, the next GM continues the running logs.
 
@@ -34,6 +34,8 @@ In Crucible worlds the log reads the four pools of a combatant instead of hit po
 * **Action cards:** Crucible changes nothing before the GM confirms an action card. The log keeps the planned outcome of every card and credits the changes of the confirmation to the combatant who used the action. A change that matches the card exactly is certain. A change that stops early, because the target had less health left, is probable. Cards that are not confirmed yet appear as open actions in the Round Log and as a note in the Summary. A deleted card disappears from the log.
 * **Undo:** reversing a confirmed card turns its changes into a correction. Damage, healing and takedowns of that card no longer count, and the card is open again until the GM confirms it once more.
 * **Critical hits and fumbles** follow Crucible's rules: a critical success or failure on an attack counts, the natural dice do not decide.
+
+Crucible rolls initiative anew at the start of every round. The Participants tab shows the initiative of the current round.
 
 Damage over time at the start of a turn and morale escalation from round 7 have no action card. They count as damage taken or healing received without a source and wait in the Corrections tab like other unexplained changes.
 
@@ -82,6 +84,8 @@ Sharing is set per combat in the Sharing tab: report detail, report sections, en
 Report sections: Combat Recap, Party Contributions, Blades and Bows, Spellwork, Healing and Support, Control Plays, Close Calls, Damage Spotlight, Awards, Hero Moments, Enemy Pressure, Tactical Turning Points, Support and Saves, and Aftermath.
 
 The Awards section lists party members only, so hidden enemy names stay hidden. Whispered rolls do not count toward Lucky or Unlucky Dice in the player report.
+
+The Sharing tab offers only the report sections that have something to tell for this combat with the chosen report detail and options. The options for enemy numbers and enemy names appear only when the combat has enemies, the option for hidden combatants only when it has hidden combatants. A choice that is not shown keeps its saved value, so a section that fills up later starts with the choice you made before.
 
 The preview in the Sharing tab shows the report as players will see it. It follows your choices right away, even before you save them.
 

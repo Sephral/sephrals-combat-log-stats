@@ -225,6 +225,23 @@ export function normalizeReportSections(sections = null) {
   return { ...DEFAULT_REPORT_SECTIONS, ...(sections ?? {}) };
 }
 
+// Keys of the sections that would show at least one line for this log with these share settings, whatever the
+// GM selected. The Sharing tab offers only these, a checkbox for an empty section would change nothing.
+export function reportSectionsWithContent(log, shareSettings = {}) {
+  const all = Object.fromEntries(REPORT_SECTIONS.map((section) => [section.key, true]));
+  const report = new PlayerReportService().buildReport(log, { shareSettings: { ...shareSettings, reportSections: all } });
+  return new Set(REPORT_SECTIONS.filter((section) => report.lines[section.key]?.length).map((section) => section.key));
+}
+
+// Share options that can change the report of this log: hidden combatants and enemies need someone to apply to.
+export function shareOptionAvailability(log) {
+  const participants = (log?.participants ?? []).filter((participant) => participant?.combatantId);
+  return {
+    hiddenCombatants: participants.some((participant) => Boolean(participant.hidden)),
+    enemies: participants.some((participant) => participant.side === SIDES.HOSTILE)
+  };
+}
+
 function sectionEnabled(report, key) {
   return normalizeReportSections(report.sections)[key] !== false;
 }

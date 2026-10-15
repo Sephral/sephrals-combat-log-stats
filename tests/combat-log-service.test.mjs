@@ -687,3 +687,49 @@ test("hit point changes while nobody recorded are found per changed value (dnd5e
   ]);
   assert.equal(log.latestSnapshots.c1["system.attributes.hp.value"], 7);
 });
+
+test("initiative written inside a combat update reaches the participants (Crucible rolls every round that way)", async () => {
+  const service = new CombatLogService();
+  service.persistence.saveLog = async (log) => log;
+  const hero = { id: "hero", name: "Hero", initiative: null, token: { disposition: 1 } };
+  const foe = { id: "foe", name: "Foe", initiative: null, token: { disposition: -1 } };
+  const combatants = Object.assign([hero, foe], { get: (id) => [hero, foe].find((entry) => entry.id === id) });
+  const combat = { id: "crucible-combat", uuid: "Combat.crucible-combat", round: 0, turn: null, started: false, combatants, scene: { uuid: "Scene.test", name: "Test Scene" } };
+  game.combats.contents = [combat];
+
+  // combatStart fires before CrucibleCombat#_preUpdate rolls initiative into the round 1 update.
+  const log = await service.startCombat(combat, { force: true });
+  assert.deepEqual(log.participants.map((entry) => entry.initiative), [null, null]);
+
+  Object.assign(combat, { round: 1, turn: 0, started: true });
+  hero.initiative = 19;
+  foe.initiative = 16;
+  await service.updateCombat(combat, { round: 1, turn: 0, combatants: [{ _id: "hero", initiative: 19 }, { _id: "foe", initiative: 16 }] });
+  assert.deepEqual(log.participants.map((entry) => entry.initiative), [19, 16]);
+  assert.equal(log.events.filter((event) => event.type === EVENT_TYPES.ROUND_CHANGED).length, 1);
+
+  // A delay changes one combatant's initiative together with the turn. Without a round or turn change no event is written.
+  const events = log.events.length;
+  foe.initiative = 4;
+  await service.updateCombat(combat, { combatants: [{ _id: "foe", initiative: 4 }, { _id: "unknown", initiative: 30 }, { _id: "hero", hidden: true }] });
+  assert.deepEqual(log.participants.map((entry) => entry.initiative), [19, 4]);
+  assert.equal(log.events.length, events);
+
+  // The value comes from the change when the combatant is not in the collection, a reset clears it.
+  await service.updateCombat({ ...combat, combatants: { get: () => undefined } }, { combatants: [{ _id: "hero", initiative: null }] });
+  assert.equal(log.participants[0].initiative, null);
+  assert.equal(await service.updateCombat(combat, { active: true }), null);
+});
+
+test("an updateCombatant initiative roll (dnd5e, core) still updates the participant", async () => {
+  const service = new CombatLogService();
+  service.persistence.saveLog = async (log) => log;
+  const hero = { id: "hero", name: "Hero", initiative: null, token: { disposition: 1 } };
+  const combat = { id: "dnd-combat", uuid: "Combat.dnd-combat", round: 1, turn: 0, started: true, combatants: [hero], scene: { uuid: "Scene.test", name: "Test Scene" } };
+  hero.combat = combat;
+  game.combats.contents = [combat];
+  const log = await service.startCombat(combat);
+  hero.initiative = 14;
+  await service.combatantUpdated(hero, { initiative: 14 });
+  assert.equal(log.participants[0].initiative, 14);
+});

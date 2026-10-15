@@ -149,13 +149,30 @@ export class CombatLogService {
   }
 
   async updateCombat(combat, changed = {}, previous = combat?.previous ?? {}) {
-    if (!("round" in changed) && !("turn" in changed)) return null;
+    const combatantChanges = Array.isArray(changed?.combatants) ? changed.combatants : [];
+    if (!("round" in changed) && !("turn" in changed) && !combatantChanges.length) return null;
     const log = await this.ensureLogForCombat(combat);
     if (!log) return null;
+    this.applyCombatantChanges(log, combat, combatantChanges);
+    if (!("round" in changed) && !("turn" in changed)) return this.saveAndCompute(log);
     const ledger = new CombatEventLedger(log);
     if ("round" in changed) ledger.combatEvent(EVENT_TYPES.ROUND_CHANGED, combat, { oldValue: previous?.round ?? null, newValue: combat.round });
     if ("turn" in changed) ledger.combatEvent(EVENT_TYPES.TURN_CHANGED, combat, { oldValue: previous?.turn ?? null, newValue: combat.turn, combatantId: combat?.combatant?.id ?? "" });
     return this.saveAndCompute(log);
+  }
+
+  // Combatant changes that arrive inside a combat update fire no updateCombatant hook. Crucible rolls initiative
+  // for every round that way (CrucibleCombat#_preUpdate adds {combatants: [{_id, initiative}]} to the round change),
+  // and so do its delay action and core's resetAll. Only the initiative is taken over here.
+  applyCombatantChanges(log, combat, changes = []) {
+    for (const change of changes) {
+      const id = change?._id;
+      if (!id || !("initiative" in change)) continue;
+      const participant = log.participants.find((entry) => entry.combatantId === id);
+      if (!participant) continue;
+      const initiative = combat?.combatants?.get?.(id)?.initiative ?? change.initiative;
+      participant.initiative = initiative ?? null;
+    }
   }
 
   async ensureLogForCombat(combat) {

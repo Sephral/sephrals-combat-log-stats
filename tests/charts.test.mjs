@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 globalThis.game = { i18n: { lang: "en", localize: (key) => key }, settings: { get: () => undefined } };
 
-const { combatantBarChart, niceMax, roundDamageChart } = await import("../scripts/apps/charts.js");
+const { combatantBarChart, combatantRows, niceMax, roundDamageChart } = await import("../scripts/apps/charts.js");
 
 test("the round chart draws a party and an enemy column per round with tooltips and a summary", () => {
   const svg = roundDamageChart([
@@ -60,4 +60,26 @@ test("a short fight keeps the round chart as wide as the combatant chart instead
   const long = roundDamageChart(Array.from({ length: 30 }, (_, index) => ({ round: index + 1, partyDamage: index, enemyDamage: 1 })));
   assert.ok(Number(long.match(/viewBox="0 0 ([\d.]+) 190"/)[1]) > 1000);
   assert.match(combatantBarChart([{ id: "a", name: "A", damageAppliedNet: 3 }]), /aria-label="SCLS\.Chart\.CombatantSummaryOne"/);
+});
+
+test("the combatant chart fills a box as large as the round chart's, for one or many combatants", () => {
+  const viewBox = (svg) => svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/).slice(1).map(Number);
+  const [roundWidth, roundHeight] = viewBox(roundDamageChart([{ round: 1, partyDamage: 5, enemyDamage: 3 }]));
+  const rows = (count) => Array.from({ length: count }, (_, index) => ({ id: `c${index}`, name: `Fighter ${index}`, damageAppliedNet: 10 + index, damageTakenNet: 4, healing: 2 }));
+  for (const count of [1, 2, 4]) {
+    const svg = combatantBarChart(rows(count));
+    assert.match(svg, /^<svg class="scls-chart__svg scls-chart__svg--bars"/);
+    assert.deepEqual(viewBox(svg), [roundWidth, roundHeight], `${count} combatants`);
+  }
+  // Few combatants get thick bars, many get rows of their own and a taller chart.
+  assert.ok(combatantRows(1).bar > combatantRows(6).bar);
+  const many = viewBox(combatantBarChart(rows(12)));
+  assert.equal(many[0], roundWidth);
+  assert.ok(many[1] > roundHeight);
+  // Value labels (10 units) never overlap: every bar plus gap is at least that high.
+  for (const count of [1, 3, 6, 12, 40]) {
+    const { rowHeight, bar } = combatantRows(count);
+    assert.ok(bar + 2 >= 10, `${count}: bar ${bar}`);
+    assert.ok((3 * bar) + 4 <= rowHeight, `${count}: bars fit the row`);
+  }
 });

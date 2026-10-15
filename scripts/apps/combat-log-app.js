@@ -2,7 +2,7 @@ import { CONFIDENCE, EVENT_TYPES, HOOKS, LOG_STATUS, MODULE_ID, RESOURCE_INTERPR
 import { getSetting } from "../settings.js";
 import { downloadData, escapeHtml, format, formatDateTime, formatDuration, isTrackingGM, localize, renderAppTemplate } from "../utils.js";
 import { CombatLogExportService } from "../services/export-service.js";
-import { formatNumber, normalizeReportSections, PlayerReportService, REPORT_SECTIONS } from "../services/player-report-service.js";
+import { formatNumber, normalizeReportSections, PlayerReportService, REPORT_SECTIONS, reportSectionsWithContent, shareOptionAvailability } from "../services/player-report-service.js";
 import { awardDetail, awardLabel, computeAwards } from "../services/awards-service.js";
 import { CombatStatsService } from "../services/stats-service.js";
 import { isCrucibleLog, termKey } from "../services/system-terms.js";
@@ -12,7 +12,9 @@ import {
   isHealingApplied, isMoraleEvent, isOpenAction, isResourceDelta, isSourceAttributed, sourceCombatantId, targetCombatantId
 } from "../services/event-insights.js";
 
-const DEFAULT_POSITION = { width: 1120, height: 760 };
+// Wide enough for all tabs with their labels in one row in English and German (measured: German needs 1155 px in
+// v14, 1130 px in v13). A narrower window shows the tabs as icons (fitTabs).
+const DEFAULT_POSITION = { width: 1200, height: 760 };
 const SHAREABLE_MODES = [SHARE_MODES.SUMMARY_ONLY, SHARE_MODES.PARTY_DPR_ONLY, SHARE_MODES.FULL_VISIBLE_DPR, SHARE_MODES.FULL_VISIBLE_RECAP, SHARE_MODES.PUBLIC_REPORT];
 const MANUAL_TYPES = [EVENT_TYPES.DAMAGE_MANUAL_ADDED, EVENT_TYPES.DAMAGE_MANUAL_REDUCED, EVENT_TYPES.HEALING_MANUAL_ADDED, EVENT_TYPES.HEALING_MANUAL_REDUCED];
 
@@ -69,6 +71,8 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
 
   async close(options = {}) {
     globalThis.Hooks?.off?.(HOOKS.LOG_UPDATED, this.onLogUpdated);
+    this.tabObserver?.disconnect();
+    this.tabObserver = null;
     return super.close(options);
   }
 
@@ -124,6 +128,8 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     if (!TABS.includes(this.activeTab)) this.activeTab = "summary";
     const computed = log.computed ?? {};
     const participantOptions = participantChoices(log);
+    // Building the report for every live render of another tab is wasted work; switching tabs renders again.
+    const sectionOptions = reportSectionOptions(log, { checkContent: this.activeTab === "sharing" });
     return {
       hasLog: true,
       hasHistory: historyEntries.length > 0,
@@ -151,7 +157,8 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       dprMethodLabel: localize(`SCLS.DprMethod.${computed.dpr?.method ?? "appliedNet"}`),
       sideRows: sideRows(log),
       sharing: sharingContext(log, this.playerReports),
-      reportSectionOptions: reportSectionOptions(log),
+      reportSectionOptions: sectionOptions,
+      hasReportSections: sectionOptions.some((option) => option.available),
       includeUnclearDeltasInStats: getSetting(SETTINGS.INCLUDE_UNCLEAR_DELTAS_IN_STATS, false)
     };
   }
@@ -161,6 +168,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     for (const panel of this.element.querySelectorAll("[data-panel]")) panel.hidden = panel.dataset.panel !== this.activeTab;
     for (const element of this.element.querySelectorAll("[data-detail-only]")) element.hidden = this.activeTab === "history";
     applyButtonTooltips(this.element.closest(".scls-window") ?? this.element);
+    this.observeTabWidth();
     for (const select of this.element.querySelectorAll("select[data-scls-action]")) {
       select.addEventListener("change", (event) => this.handleSelectChange(event));
     }
@@ -171,11 +179,22 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     }
   }
 
+  // Keeps the tabs in one row: when the window gets too narrow for the labels, the tabs show icons only.
+  observeTabWidth() {
+    fitTabs(this.element?.querySelector(".scls-tabs"));
+    if (this.tabObserver || typeof globalThis.ResizeObserver !== "function" || !this.element) return;
+    this.tabObserver = new globalThis.ResizeObserver(() => fitTabs(this.element?.querySelector(".scls-tabs")));
+    this.tabObserver.observe(this.element);
+  }
+
   // Shows the player report for the settings in the form, saved or not. Read only, nothing is posted.
+  // The section checkboxes follow the same settings: a section without content for them is hidden.
   renderReportPreview(form) {
+    if (!this.renderedLog || this.activeTab !== "sharing") return;
+    const formData = new FormData(form);
+    showReportSections(form, reportSectionsWithContent(this.renderedLog, reportSettingsFromForm(this.renderedLog, formData)));
     const preview = this.element?.querySelector("[data-scls-report-preview]");
-    if (!preview || !this.renderedLog || this.activeTab !== "sharing") return;
-    preview.innerHTML = reportPreviewHtml(this.playerReports, this.renderedLog, new FormData(form));
+    if (preview) preview.innerHTML = reportPreviewHtml(this.playerReports, this.renderedLog, formData);
   }
 
   async saveLog(log) {
@@ -443,6 +462,23 @@ function discordPartsContent(messages) {
   return `<div class="scls-discord-parts"><p>${escapeHtml(localize("SCLS.Discord.Hint"))}</p>${parts.join("")}</div>`;
 }
 
+// Measured with the labels shown, so a wider window brings them back.
+function fitTabs(nav) {
+  if (!nav?.classList) return false;
+  nav.classList.remove("scls-tabs--compact");
+  const compact = nav.scrollWidth > nav.clientWidth + 1;
+  nav.classList.toggle("scls-tabs--compact", compact);
+  return compact;
+}
+
+// Hidden checkboxes stay in the form, so saving keeps their stored value for a later state that fills the section.
+function showReportSections(form, available) {
+  const labels = Array.from(form?.querySelectorAll?.("[data-scls-report-section]") ?? []);
+  for (const label of labels) label.hidden = !available.has(label.dataset.sclsReportSection);
+  const fieldset = form?.querySelector?.(".scls-report-sections");
+  if (fieldset) fieldset.hidden = !labels.some((label) => !label.hidden);
+}
+
 function reportPreviewHtml(playerReports, log, formData) {
   return playerReports.renderHtml(playerReports.buildReport(log, { shareSettings: reportSettingsFromForm(log, formData) }));
 }
@@ -604,8 +640,11 @@ function combatRounds(log) {
     const events = (log.events ?? []).filter((event) => (Number(event.round) || 0) === round && !event.ignored);
     const actions = events.flatMap((event) => roundActions(event, participants, appliedMessages));
     if (!actions.length) continue;
-    const heroDamage = sumRoundAmount(actions, SIDES.FRIENDLY, "damage");
-    const foeDamage = sumRoundAmount(actions, SIDES.HOSTILE, "damage");
+    // The round totals come from the statistics when they are there, so the round log and the chart agree (damage
+    // without a known source counts for the other side, corrections are taken back in the right round).
+    const computedRound = log.computed?.byRound?.find((row) => Number(row.round) === round);
+    const heroDamage = computedRound ? Number(computedRound.partyDamage) || 0 : sumRoundAmount(actions, SIDES.FRIENDLY, "damage");
+    const foeDamage = computedRound ? Number(computedRound.enemyDamage) || 0 : sumRoundAmount(actions, SIDES.HOSTILE, "damage");
     const healing = actions.filter((action) => action.kind === "healing").reduce((total, action) => total + action.amount, 0);
     rounds.push({
       round,
@@ -1035,9 +1074,16 @@ function percent(value, total) {
   return Math.max(2, Math.min(100, Math.round((numericValue / numericTotal) * 100)));
 }
 
+// The mode the Sharing form preselects: the saved one, else the default from the settings.
+function formShareMode(share = {}) {
+  if (SHAREABLE_MODES.includes(share.shareMode)) return share.shareMode;
+  return SHAREABLE_MODES.includes(getSetting(SETTINGS.DEFAULT_SHARE_MODE)) ? getSetting(SETTINGS.DEFAULT_SHARE_MODE) : SHARE_MODES.FULL_VISIBLE_RECAP;
+}
+
 function sharingContext(log, playerReports) {
   const share = log.shareSettings ?? {};
-  const mode = SHAREABLE_MODES.includes(share.shareMode) ? share.shareMode : (SHAREABLE_MODES.includes(getSetting(SETTINGS.DEFAULT_SHARE_MODE)) ? getSetting(SETTINGS.DEFAULT_SHARE_MODE) : SHARE_MODES.FULL_VISIBLE_RECAP);
+  const mode = formShareMode(share);
+  const options = shareOptionAvailability(log);
   return {
     isShared: Boolean(share.isShared),
     sharingEnabled: getSetting(SETTINGS.ENABLE_PLAYER_SHARING, true) !== false,
@@ -1046,37 +1092,58 @@ function sharingContext(log, playerReports) {
     anonymizeEnemies: Boolean(share.anonymizeEnemies),
     includeEnemyStats: Boolean(share.includeEnemyStats),
     includeHiddenCombatants: Boolean(share.includeHiddenCombatants),
+    // Options without anyone to apply to stay in the form, hidden, and keep their stored value.
+    showEnemyOptions: options.enemies,
+    showHiddenOption: options.hiddenCombatants,
     canPost: playerReports.canShare({ ...log, shareSettings: { ...share, isShared: true, shareMode: mode } })
   };
 }
 
-function reportSectionOptions(log) {
-  const selected = normalizeReportSections(log.shareSettings?.reportSections);
+// available: the section has content with the saved settings, as the form first shows them. Every change in the
+// form updates it again (renderReportPreview).
+function reportSectionOptions(log, { checkContent = true } = {}) {
+  const share = log.shareSettings ?? {};
+  const selected = normalizeReportSections(share.reportSections);
+  const available = !checkContent ? new Set(REPORT_SECTIONS.map((section) => section.key)) : reportSectionsWithContent(log, reportSettingsFromValues(log, {
+    shareMode: formShareMode(share),
+    includeEnemyStats: Boolean(share.includeEnemyStats),
+    anonymizeEnemies: Boolean(share.anonymizeEnemies),
+    includeHiddenCombatants: Boolean(share.includeHiddenCombatants),
+    sections: REPORT_SECTIONS.filter((section) => selected[section.key] !== false).map((section) => section.key)
+  }));
   return REPORT_SECTIONS.map((section) => ({
     value: section.key,
     label: localize(section.labelKey),
-    selected: selected[section.key] !== false
+    selected: selected[section.key] !== false,
+    available: available.has(section.key)
   }));
 }
 
-function reportSectionsFromForm(formData) {
-  const selected = new Set(formData.getAll("reportSections").map(String));
-  return Object.fromEntries(REPORT_SECTIONS.map((section) => [section.key, selected.has(section.key)]));
+// Share settings as the form shows them. Saving, posting, the preview and the Discord copy all read them this way.
+// Hidden options are part of the form as well, so they keep their stored value.
+function reportSettingsFromForm(log, formData) {
+  return reportSettingsFromValues(log, {
+    shareMode: formData.get("shareMode"),
+    includeEnemyStats: formData.get("includeEnemyStats") !== null,
+    anonymizeEnemies: formData.get("anonymizeEnemies") !== null,
+    includeHiddenCombatants: formData.get("includeHiddenCombatants") !== null,
+    sections: formData.getAll("reportSections")
+  });
 }
 
-// Share settings as the form shows them. Saving, posting, the preview and the Discord copy all read them this way.
-function reportSettingsFromForm(log, formData) {
-  const requestedMode = String(formData.get("shareMode") ?? "");
-  const sections = reportSectionsFromForm(formData);
+function reportSettingsFromValues(log, { shareMode, includeEnemyStats, anonymizeEnemies, includeHiddenCombatants, sections: sectionKeys = [] }) {
+  const requestedMode = String(shareMode ?? "");
+  const selected = new Set(sectionKeys.map(String));
+  const sections = Object.fromEntries(REPORT_SECTIONS.map((section) => [section.key, selected.has(section.key)]));
   return {
     ...log.shareSettings,
     isShared: true,
     shareMode: SHAREABLE_MODES.includes(requestedMode) ? requestedMode : SHARE_MODES.FULL_VISIBLE_RECAP,
     includePartyStats: true,
-    includeEnemyStats: formData.get("includeEnemyStats") !== null,
-    anonymizeEnemies: formData.get("anonymizeEnemies") !== null,
-    includeNpcNames: formData.get("anonymizeEnemies") === null,
-    includeHiddenCombatants: formData.get("includeHiddenCombatants") !== null,
+    includeEnemyStats: Boolean(includeEnemyStats),
+    anonymizeEnemies: Boolean(anonymizeEnemies),
+    includeNpcNames: !anonymizeEnemies,
+    includeHiddenCombatants: Boolean(includeHiddenCombatants),
     includePrivateRolls: false,
     includeGMNotes: false,
     includeUnclearEvents: false,
@@ -1122,5 +1189,5 @@ function interpretationOptions(selectedInterpretation, systemId = "") {
 
 export const __test__ = {
   chartContext, awardCards, warningLines, combatMetrics, combatRounds, correctionEvents, dprRows, sortedDprRows, dprColumns, participantRows, manualAdjustmentEvents, historyRows, tabNavigation,
-  confirmDeleteCombatLog, interpretationOptions, applyReportSettings, reportSettingsFromForm, reportPreviewHtml, sharingContext, copyText, showDiscordParts, discordPartsContent
+  confirmDeleteCombatLog, interpretationOptions, applyReportSettings, reportSettingsFromForm, reportPreviewHtml, reportSectionOptions, showReportSections, fitTabs, sharingContext, copyText, showDiscordParts, discordPartsContent
 };
