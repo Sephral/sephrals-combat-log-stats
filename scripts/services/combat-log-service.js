@@ -338,7 +338,7 @@ export class CombatLogService {
       visibility: whispered ? "gm" : "public",
       source: { kind: SOURCE_KINDS.CHAT_MESSAGE, id: message.id },
       confidence: CONFIDENCE.SAFE,
-      data: { speakerAlias: whispered ? "" : String(message?.speaker?.alias ?? ""), rollCount: Array.from(message?.rolls ?? []).length }
+      data: { speakerAlias: whispered ? "" : String(message?.speaker?.alias ?? ""), rollCount: this.adapter.messageRolls(message).length }
     });
 
     // A re-created copy of a card (midi-qol) carries rolls that are already recorded under the first card.
@@ -410,7 +410,7 @@ export class CombatLogService {
   async chatMessageUpdated(message, changed = {}) {
     if (!message?.id) return null;
     this.debugTrace.add("updateChatMessage", messageTrace(message, changed));
-    if (Array.isArray(changed?.rolls)) await this.recordAddedRolls(message);
+    if (this.adapter.rollsChanged(changed)) await this.recordAddedRolls(message);
     const confirmed = this.adapter.readConfirmation?.(message, changed);
     if (typeof confirmed !== "boolean") return null;
     const touched = [];
@@ -434,7 +434,7 @@ export class CombatLogService {
     const log = knownLog ?? this.findLogForMessage(message);
     if (!log) return null;
     const sourceId = log.messageAliases?.[message.id] ?? message.id;
-    const rolls = Array.from(message?.rolls ?? []);
+    const rolls = this.adapter.messageRolls(message);
     const recorded = (log.events ?? []).filter((event) => event.source?.kind === SOURCE_KINDS.ROLL && event.source?.id === sourceId);
     const combat = this.findCombatForLog(log);
     let changed = false;
@@ -474,7 +474,7 @@ export class CombatLogService {
   recordRolls(log, message, combat, { fromIndex = 0, sourceId = message?.id } = {}) {
     if (this.adapter.skipRolls?.(message)) return;
     const ledger = new CombatEventLedger(log);
-    Array.from(message?.rolls ?? []).forEach((roll, index) => {
+    this.adapter.messageRolls(message).forEach((roll, index) => {
       if (index < fromIndex) return;
       ledger.append({ ...this.rollEventFields(log, message, combat, roll, index), source: { kind: SOURCE_KINDS.ROLL, id: sourceId } });
     });
@@ -544,9 +544,10 @@ export class CombatLogService {
 
   // Called from system hooks (dnd5e.preApplyDamage) right before the hit point update they cause.
   // expected: the hit points the application will write ({ value, temp }), when the system tells.
-  noteSystemApplication(actor, { amount = 0, message = null, sourceActorUuid = "", reversal = false, expected = null, options = null } = {}) {
+  // via: how the adapter found the message, for the debug log.
+  noteSystemApplication(actor, { amount = 0, message = null, sourceActorUuid = "", reversal = false, expected = null, options = null, via = "" } = {}) {
     if (!actor?.uuid || !isTrackingGM()) return;
-    this.debugTrace.add("dnd5e.preApplyDamage", applicationTrace(actor, { amount, message, sourceActorUuid }, options));
+    this.debugTrace.add("dnd5e.preApplyDamage", applicationTrace(actor, { amount, message, sourceActorUuid, via }, options));
     const queue = this.pendingApplications.get(actor.uuid) ?? [];
     queue.push({ amount, messageId: message?.id ?? "", message, sourceActorUuid, reversal, expected, at: Date.now() });
     this.pendingApplications.set(actor.uuid, queue);

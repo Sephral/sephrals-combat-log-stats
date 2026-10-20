@@ -38,6 +38,7 @@ export function applicationTrace(actor, application = {}, options = {}) {
     actorUuid: actor?.uuid ?? "",
     amount: application.amount ?? null,
     messageId: application.message?.id ?? "",
+    via: application.via || undefined,
     sourceActorUuid: application.sourceActorUuid ?? "",
     optionKeys: Object.keys(options ?? {}),
     midi: options?.midi ? pick(options.midi, ["sourceActorUuid", "targetUuid", "itemType", "isHit", "isCritical", "saved"]) : undefined,

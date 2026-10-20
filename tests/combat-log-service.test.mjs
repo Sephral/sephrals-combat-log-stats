@@ -474,6 +474,53 @@ test("midi-qol damage applied on another client is credited through the update o
   assert.equal(delta.data.attribution, "systemApplied");
 });
 
+test("Ready Set Roll: the rolls in its flags are recorded and its damage buttons credit the card's speaker", async () => {
+  const { __test__: dnd5eTest } = await import("../scripts/adapters/dnd5e-adapter.js");
+  const handlers = {};
+  const system = game.system.id;
+  game.system.id = "dnd5e";
+  globalThis.Hooks.on = (name, handler) => { handlers[name] = handler; };
+  try {
+    const service = new CombatLogService({ persistDelayMs: 0 });
+    service.persistence.saveLog = async (log) => log;
+    const { combat, log } = hpLog();
+    service.activeLogs.set(combat.id, log);
+    const goblin1 = hpActor({ id: "goblin", uuid: "Scene.test.Token.g1.Actor.goblin", hp: 7, token: { uuid: "Scene.test.Token.g1" } });
+    const card = { id: "rsr-card", type: "usage", speaker: { scene: "test", token: "hero-token", actor: "hero-actor" }, flags: { dnd5e: { targets: [] }, rsr5e: { quickRoll: true, processed: false } }, rolls: [] };
+    game.messages = { get: (id) => (id === card.id ? card : null) };
+
+    // The card is posted without rolls, Ready Set Roll writes them into its flags right after.
+    await service.chatMessageCreated(card);
+    const rolls = [
+      { class: "D20Roll", formula: "1d20 + 5", total: 17, options: { rollType: "attack" } },
+      { class: "DamageRoll", formula: "1d8 + 3", total: 9, options: { rollType: "damage", type: "slashing" } }
+    ];
+    card.flags.rsr5e = { quickRoll: true, processed: true, rolls };
+    await service.chatMessageUpdated(card, { flags: { rsr5e: { processed: true, rolls } } });
+    assert.deepEqual(log.events.filter((event) => event.source?.kind === "roll").map((event) => [event.type, event.combatantId, event.data.total]),
+      [[EVENT_TYPES.ROLL_ATTACK, "hero", 17], [EVENT_TYPES.ROLL_DAMAGE, "hero", 9]]);
+
+    // The GM selects the goblin and clicks a damage button: dnd5e's hook names no message.
+    const box = { dataset: { messageId: card.id } };
+    const button = { closest: (selector) => (selector.includes("data-message-id") ? box : button) };
+    dnd5eTest.noteCardClick(button);
+    handlers["dnd5e.preApplyDamage"](goblin1, 9, { "system.attributes.hp.value": 0, "system.attributes.hp.temp": 0 }, { multiplier: 1 });
+    await applyHp(service, goblin1, { value: 0 });
+
+    const delta = log.events.find((event) => event.type === EVENT_TYPES.RESOURCE_DELTA);
+    assert.equal(delta.combatantId, "hero");
+    assert.equal(delta.data.attribution, "systemApplied");
+    assert.equal(delta.data.correlation.messageId, card.id);
+    assert.equal(service.debugTrace.entries.find((entry) => entry.hook === "dnd5e.preApplyDamage").via, "cardClick");
+    assert.equal(log.computed.byCombatant.find((row) => row.id === "hero").takedowns, 1);
+    dnd5eTest.noteCardClick(null);
+  } finally {
+    game.system.id = system;
+    delete globalThis.Hooks.on;
+    delete game.messages;
+  }
+});
+
 test("hit point changes without a snapshot of the old state are skipped instead of guessed", async () => {
   const service = new CombatLogService({ persistDelayMs: 0 });
   service.persistence.saveLog = async (log) => log;

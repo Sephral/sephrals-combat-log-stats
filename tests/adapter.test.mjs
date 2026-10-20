@@ -220,3 +220,57 @@ test("dnd5e adapter recognises a re-created midi-qol card by its timestamp and s
     delete globalThis.game.messages;
   }
 });
+
+// A button inside a chat card, as the click listener sees it.
+function cardButton(messageId) {
+  const card = { dataset: { messageId } };
+  const button = { closest: (selector) => (selector.includes("data-message-id") ? card : button) };
+  return button;
+}
+
+test("dnd5e adapter reads the rolls Ready Set Roll keeps in its flags", () => {
+  const dnd5e = new Dnd5eSystemAdapter();
+  const stored = [
+    { class: "D20Roll", formula: "1d20 + 5", total: 17, options: { rollType: "attack" } },
+    { class: "DamageRoll", formula: "2d6 + 2", total: 9, options: { rollType: "damage", type: "fire" } }
+  ];
+  const message = { rolls: [], flags: { rsr5e: { processed: true, rolls: stored } } };
+  const previousRoll = globalThis.Roll;
+  globalThis.Roll = class Roll { static fromData(data) { return Object.assign(new this(), data, { restored: true }); } };
+  try {
+    assert.deepEqual(dnd5e.messageRolls(message).map((roll) => [roll.restored, roll.total]), [[true, 17], [true, 9]]);
+  } finally {
+    if (previousRoll) globalThis.Roll = previousRoll;
+    else delete globalThis.Roll;
+  }
+  // Without Foundry's Roll class the stored data is read as it is.
+  assert.deepEqual(dnd5e.messageRolls(message).map((roll) => dnd5e.classifyRoll(roll, message).type), [EVENT_TYPES.ROLL_ATTACK, EVENT_TYPES.ROLL_DAMAGE]);
+  assert.deepEqual(dnd5e.messageRolls({ rolls: [{ total: 3 }], flags: {} }).map((roll) => roll.total), [3]);
+  assert.equal(dnd5e.rollsChanged({ flags: { rsr5e: { rolls: stored } } }), true);
+  assert.equal(dnd5e.rollsChanged({ flags: { rsr5e: { processed: true } } }), false);
+  assert.equal(adapter.rollsChanged({ flags: { rsr5e: { rolls: stored } } }), false);
+});
+
+test("dnd5e adapter takes the card whose button was just clicked, not for the token HUD, a check or an old click", async () => {
+  const { __test__ } = await import("../scripts/adapters/dnd5e-adapter.js");
+  const dnd5e = new Dnd5eSystemAdapter();
+  const damageCard = { id: "dmg", flags: { rsr5e: { rolls: [{ formula: "1d8 + 3", total: 7, options: { rollType: "damage" } }] } } };
+  const checkCard = { id: "check", flags: { dnd5e: { roll: { type: "skill" } } }, rolls: [{ formula: "1d20 + 2", total: 12, options: {} }] };
+  globalThis.game = { ...(globalThis.game ?? {}), messages: { get: (id) => ({ dmg: damageCard, check: checkCard })[id] ?? null } };
+  try {
+    __test__.noteCardClick(cardButton("dmg"), 1000);
+    assert.equal(dnd5e.clickedDamageCard({ multiplier: 1 }, 1500), damageCard);
+    // dnd5e 5.2's tray passes isDelta with a multiplier, the token HUD isDelta alone.
+    assert.equal(dnd5e.clickedDamageCard({ multiplier: 1, isDelta: true }, 1500), damageCard);
+    assert.equal(dnd5e.clickedDamageCard({ isDelta: true }, 1500), null);
+    assert.equal(dnd5e.clickedDamageCard({ multiplier: 1 }, 4500), null);
+    __test__.noteCardClick(cardButton("check"), 5000);
+    assert.equal(dnd5e.clickedDamageCard({}, 5100), null);
+    // A click outside any card (the token HUD) forgets the card.
+    __test__.noteCardClick(cardButton("dmg"), 6000);
+    __test__.noteCardClick({ closest: () => null }, 6100);
+    assert.equal(dnd5e.clickedDamageCard({}, 6200), null);
+  } finally {
+    delete globalThis.game.messages;
+  }
+});

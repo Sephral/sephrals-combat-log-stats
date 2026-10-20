@@ -73,22 +73,48 @@ export class Dnd5eSystemAdapter extends GenericSystemAdapter {
 
   // The tray and Actor5e#applyDamage of dnd5e 5.3 pass the damage roll message as options.originatingMessage (5.2 does
   // not). midi-qol applies its damage without a message, but names the attacker in options.midi.sourceActorUuid.
+  // Ready Set Roll's damage buttons and the tray of 5.2 pass neither: the card whose button was just clicked is the message.
   // The expected hit points let the service skip applications that changed nothing (0 damage after immunity).
   registerSystemHooks(service) {
+    trackCardClicks();
     globalThis.Hooks?.on?.("dnd5e.preApplyDamage", (actor, amount, updates, options = {}) => {
       const hp = actor?.system?.attributes?.hp ?? {};
       const expected = { value: numberOrUndefined(updates?.["system.attributes.hp.value"]), temp: numberOrUndefined(updates?.["system.attributes.hp.temp"]) };
       const change = { value: [Number(hp.value), expected.value], temp: [Number(hp.temp), expected.temp] };
       const midi = midiApplication(actor, change, options, Number(amount) || 0);
+      const clicked = options?.originatingMessage || midi.sourceActorUuid ? null : this.clickedDamageCard(options);
       service?.noteSystemApplication?.(actor, {
         amount: Number(amount) || 0,
-        message: options?.originatingMessage ?? midiCardOf(midi.sourceActorUuid),
+        message: options?.originatingMessage ?? midiCardOf(midi.sourceActorUuid) ?? clicked,
         sourceActorUuid: midi.sourceActorUuid,
         reversal: midi.reversal,
         expected,
-        options
+        options,
+        via: options?.originatingMessage ? "originatingMessage" : midi.sourceActorUuid ? "midi" : clicked ? "cardClick" : ""
       });
     });
+  }
+
+  // The card with damage or healing rolls whose button was clicked a moment ago. The token HUD's hit point field applies
+  // typed numbers, never a card: it passes isDelta without the multiplier that card buttons, trays and menus pass.
+  clickedDamageCard(options = {}, now = Date.now()) {
+    const typed = Object.hasOwn(options ?? {}, "isDelta") && !Object.hasOwn(options ?? {}, "multiplier");
+    if (!lastCardClick || typed || now - lastCardClick.at > CARD_CLICK_WINDOW_MS) return null;
+    const message = globalThis.game?.messages?.get?.(lastCardClick.messageId) ?? null;
+    if (!message) return null;
+    const applicable = new Set([EVENT_TYPES.ROLL_DAMAGE, EVENT_TYPES.ROLL_HEALING]);
+    return this.messageRolls(message).some((roll) => applicable.has(this.classifyRoll(roll, message).type)) ? message : null;
+  }
+
+  // Ready Set Roll (dnd5e 5.3 builds) keeps the rolls of its cards serialized in flags.rsr5e.rolls and leaves
+  // message.rolls empty. The flag wins whenever it is there, as in Ready Set Roll itself.
+  messageRolls(message) {
+    const stored = message?.flags?.rsr5e?.rolls;
+    return Array.isArray(stored) ? stored.map(restoreRoll).filter(Boolean) : super.messageRolls(message);
+  }
+
+  rollsChanged(changed) {
+    return super.rollsChanged(changed) || Array.isArray(changed?.flags?.rsr5e?.rolls);
   }
 
   // An update that no hook announced on the recording GM's screen: midi-qol may apply damage on another GM's client
@@ -119,6 +145,37 @@ export class Dnd5eSystemAdapter extends GenericSystemAdapter {
 }
 
 const HEALING_TYPES = new Set(["healing", "temphp"]);
+// A card button applies its damage right away; a click older than this explains nothing.
+const CARD_CLICK_WINDOW_MS = 3000;
+
+// The chat card button clicked last on this client: { messageId, at }.
+let lastCardClick = null;
+let trackingClicks = false;
+
+// Capture phase, so the card is known before the button's own handler applies the damage. A click anywhere else
+// (the token HUD, a sheet, the canvas) forgets the card again.
+function trackCardClicks(target = globalThis.document) {
+  if (trackingClicks || typeof target?.addEventListener !== "function") return;
+  trackingClicks = true;
+  target.addEventListener("click", (event) => noteCardClick(event.target), { capture: true });
+}
+
+function noteCardClick(element, now = Date.now()) {
+  const button = element?.closest?.("button, [data-action]");
+  const messageId = button?.closest?.("[data-message-id]")?.dataset?.messageId ?? "";
+  lastCardClick = messageId ? { messageId, at: now } : null;
+}
+
+// Ready Set Roll stores Roll#toJSON(). Rebuilt rolls keep their class (D20Roll, DamageRoll), critical state and dice.
+function restoreRoll(data) {
+  const Roll = globalThis.foundry?.dice?.Roll ?? globalThis.Roll;
+  if (!data || typeof data !== "object" || (Roll && data instanceof Roll)) return data ?? null;
+  try {
+    return Roll?.fromData?.(data) ?? data;
+  } catch {
+    return data;
+  }
+}
 
 function numberOrUndefined(value) {
   return value === undefined || value === null || value === "" || !Number.isFinite(Number(value)) ? undefined : Number(value);
@@ -175,7 +232,7 @@ function midiCardOf(sourceActorUuid) {
   return findMidiCards((message) => message.flags["midi-qol"].sourceActorUuid === sourceActorUuid && Array.from(message.rolls ?? []).length > 0)[0] ?? null;
 }
 
-export const __test__ = { midiApplication, midiRollType };
+export const __test__ = { midiApplication, midiRollType, noteCardClick };
 
 function resolveItem(message, flags) {
   const uuid = flags.item?.uuid;

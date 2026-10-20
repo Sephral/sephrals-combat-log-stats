@@ -80,6 +80,17 @@ export class GenericSystemAdapter {
 
   registerSystemHooks() {}
 
+  // The rolls of a chat message. Modules that keep a card's rolls elsewhere (Ready Set Roll in dnd5e) are read by the
+  // system adapter.
+  messageRolls(message) {
+    return Array.from(message?.rolls ?? []);
+  }
+
+  // Whether an update of a chat message brought other rolls.
+  rollsChanged(changed) {
+    return Array.isArray(changed?.rolls);
+  }
+
   // Conditions one combatant puts on another and states the system sets on its own.
   controlStatuses() {
     return CONTROL_STATUSES;

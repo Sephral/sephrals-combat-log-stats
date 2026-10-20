@@ -19,7 +19,7 @@ Players can open the same window too, read only. See [What players see](#what-pl
 ## What is tracked
 
 * **Hit points:** every change of hit points, temporary hit points and maximum hit points of a combatant. A change to 0 hit points counts as downed.
-* **Who did it:** in D&D 5e the damage and healing you apply from a chat card are credited to the combatant who rolled them. With midi-qol the damage it applies is credited to the attacker of its workflow, and *undo* on midi-qol's damage card takes that damage back as a correction. In other systems the log matches a hit point change to a fitting damage or healing roll. Changes that fit several rolls, or none, wait in the Corrections tab until the GM assigns them.
+* **Who did it:** in D&D 5e the damage and healing you apply from a chat card are credited to the combatant who rolled them. With midi-qol the damage it applies is credited to the attacker of its workflow, and *undo* on midi-qol's damage card takes that damage back as a correction. With Ready Set Roll its rolls are recorded and the damage and healing buttons on its cards credit the combatant of that card. In other systems the log matches a hit point change to a fitting damage or healing roll. Changes that fit several rolls, or none, wait in the Corrections tab until the GM assigns them.
 * **Rolls:** attack rolls with critical hits and fumbles, damage and healing rolls, saves and checks. Damage rolls that were never applied appear as open rolls in the Round Log. In other systems a natural 20 on a single d20 counts as a critical hit and a natural 1 as a fumble, also with advantage or disadvantage.
 * **Conditions and effects:** conditions put on an enemy count as control plays. Automatic states such as bloodied, dead or concentrating do not, and the Round Log and the reports leave them out.
 * **Combat flow:** start, rounds, turns, combatants joining or leaving, reloads and the end of combat.
@@ -164,7 +164,7 @@ On The Forge with Foundry v14 the logs go to your Assets Library, in the folder 
 
 ## Limitations
 
-* Exact attribution in D&D 5e works when the GM applies the damage from the chat card. When a player applies damage on their own client, the log falls back to matching rolls. dnd5e 5.2 does not tell which roll its chat card applies, so there the log always matches the targeted roll.
+* Exact attribution in D&D 5e works when the GM applies the damage from the chat card. When a player applies damage on their own client, the log falls back to matching rolls. dnd5e 5.2 and Ready Set Roll do not tell which card they apply, so the log takes the card whose button the GM clicked a moment before.
 * With midi-qol the attacker is known wherever midi-qol applies the damage, also on another GM's screen. midi-qol's *Undo workflow* is not recognised: the hit points that come back count as healing. Healing that gives back exactly the last hit a moment later can be read as an undo of that hit.
 * In Crucible two open cards with the same outcome on the same target wait for the confirmation of their card before the log credits the change.
 * Systems that keep hit points in an unusual place may need extra setup. Ask on [Discord](https://discord.gg/7BjCgDYaBP).
