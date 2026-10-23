@@ -4,16 +4,22 @@ import { GenericSystemAdapter } from "./generic-adapter.js";
 
 // dnd5e 5.x writes the roll type to flags.dnd5e.roll.type (attack, damage, healing, save, ability,
 // skill, tool, death, hitDie, generic) and the source item and activity to flags.dnd5e.item/activity.
+// dnd5e 6 gives every roll card a message type instead (attack, check, save, damage, healing, ...) and keeps item,
+// activity and targets in its system data. Its rolls carry the message type as rollType: a skill check says "check".
 const ROLL_TYPES = Object.freeze({
   attack: EVENT_TYPES.ROLL_ATTACK,
   damage: EVENT_TYPES.ROLL_DAMAGE,
   healing: EVENT_TYPES.ROLL_HEALING,
   save: EVENT_TYPES.ROLL_SAVE,
   death: EVENT_TYPES.ROLL_SAVE,
+  concentration: EVENT_TYPES.ROLL_SAVE,
   ability: EVENT_TYPES.ROLL_CHECK,
   skill: EVENT_TYPES.ROLL_CHECK,
   tool: EVENT_TYPES.ROLL_CHECK,
+  check: EVENT_TYPES.ROLL_CHECK,
   hitDie: EVENT_TYPES.ROLL_OTHER,
+  hitPoints: EVENT_TYPES.ROLL_OTHER,
+  recharge: EVENT_TYPES.ROLL_OTHER,
   generic: EVENT_TYPES.ROLL_OTHER
 });
 
@@ -31,8 +37,10 @@ export class Dnd5eSystemAdapter extends GenericSystemAdapter {
 
   classifyRoll(roll, message) {
     const flags = message?.flags?.dnd5e ?? {};
+    // dnd5e 6 turns an initiative roll into a check message of the type initiative.
+    if (message?.type === "check" && message.system?.type === "initiative") return { type: EVENT_TYPES.ROLL_OTHER, confidence: CONFIDENCE.SAFE };
     // Item cards hold several rolls (midi-qol puts attack and damage into one card), so the roll's own type comes first.
-    const rollType = String(roll?.options?.rollType ?? flags.roll?.type ?? midiRollType(roll) ?? "");
+    const rollType = String(roll?.options?.rollType ?? flags.roll?.type ?? midiRollType(roll) ?? typedRollType(message) ?? "");
     // dnd5e rolls healing as a DamageRoll of the type healing or temphp.
     if (rollType === "damage" && HEALING_TYPES.has(String(roll?.options?.type ?? ""))) return { type: EVENT_TYPES.ROLL_HEALING, confidence: CONFIDENCE.SAFE };
     if (ROLL_TYPES[rollType]) return { type: ROLL_TYPES[rollType], confidence: CONFIDENCE.SAFE };
@@ -57,18 +65,38 @@ export class Dnd5eSystemAdapter extends GenericSystemAdapter {
 
   // Name and kind (melee, ranged, spell) of the item or activity behind a dnd5e chat message.
   describeAction(message) {
-    const flags = message?.flags?.dnd5e ?? {};
-    const item = resolveItem(message, flags);
-    const activity = resolveActivity(item, flags);
-    const itemData = item ?? flags.item?.data ?? null;
+    const itemRef = messageReference(message, "item");
+    const activityRef = messageReference(message, "activity");
+    const item = resolveItem(message, itemRef);
+    const activity = resolveActivity(item, activityRef);
+    const itemData = item ?? storedItemData(message, itemRef);
     const actionName = String(itemData?.name ?? activity?.name ?? "").trim() || super.describeAction(message).actionName;
     return {
       actionName,
       actionKind: actionKindFor(itemData, activity),
-      itemUuid: String(flags.item?.uuid ?? item?.uuid ?? ""),
-      itemType: String(itemData?.type ?? flags.item?.type ?? ""),
-      activityType: String(activity?.type ?? flags.activity?.type ?? "")
+      itemUuid: String(itemRef?.uuid ?? item?.uuid ?? ""),
+      itemType: String(itemData?.type ?? itemRef?.type ?? ""),
+      activityType: String(activity?.type ?? activityRef?.type ?? "")
     };
+  }
+
+  // dnd5e 6 names the targets of a roll card in system.targets ({ actor, token, name } with UUIDs); dnd5e 5 in flags.
+  extractMessageTargets(message) {
+    const found = super.extractMessageTargets(message);
+    const targets = message?.system?.targets;
+    if (!Array.isArray(targets) || !targets.length) return found;
+    const actorUuids = new Set(found.actorUuids);
+    const tokenUuids = new Set(found.tokenUuids);
+    const names = new Set(found.names);
+    for (const target of targets) {
+      const actor = typeof target?.actor === "string" ? target.actor : "";
+      // An unlinked target's actor is synthetic (Scene.x.Token.y.Actor.z): its token part identifies it.
+      const token = tokenPart(target?.token) || tokenPart(actor);
+      if (token) tokenUuids.add(token);
+      if (actor.startsWith("Actor.")) actorUuids.add(actor);
+      if (typeof target?.name === "string" && target.name.trim()) names.add(target.name.trim());
+    }
+    return { actorUuids: Array.from(actorUuids), tokenUuids: Array.from(tokenUuids), names: Array.from(names) };
   }
 
   // The tray and Actor5e#applyDamage of dnd5e 5.3 pass the damage roll message as options.originatingMessage (5.2 does
@@ -145,6 +173,28 @@ export class Dnd5eSystemAdapter extends GenericSystemAdapter {
 }
 
 const HEALING_TYPES = new Set(["healing", "temphp"]);
+const TYPED_ROLL_MESSAGES = new Set(["attack", "check", "save", "damage", "healing", "generic", "hitDie", "hitPoints", "recharge"]);
+
+// The roll type a dnd5e 6 message names by its own type.
+function typedRollType(message) {
+  return TYPED_ROLL_MESSAGES.has(message?.type) ? message.type : null;
+}
+
+// The item or activity a card names: flags.dnd5e in dnd5e 5, system.item and system.activity in dnd5e 6.
+function messageReference(message, key) {
+  return message?.flags?.dnd5e?.[key] ?? message?.system?.[key] ?? null;
+}
+
+// The snapshot of a deleted item: flags.dnd5e.item.data in dnd5e 5, system.deltas.deleted in dnd5e 6.
+function storedItemData(message, itemRef) {
+  if (itemRef?.data) return itemRef.data;
+  const deleted = message?.system?.deltas?.deleted;
+  return Array.isArray(deleted) && itemRef?.id ? deleted.find((data) => data?._id === itemRef.id) ?? null : null;
+}
+
+function tokenPart(uuid) {
+  return typeof uuid === "string" ? /^Scene\.[^.]+\.Token\.[^.]+/.exec(uuid)?.[0] ?? "" : "";
+}
 // A card button applies its damage right away; a click older than this explains nothing.
 const CARD_CLICK_WINDOW_MS = 3000;
 
@@ -234,8 +284,8 @@ function midiCardOf(sourceActorUuid) {
 
 export const __test__ = { midiApplication, midiRollType, noteCardClick };
 
-function resolveItem(message, flags) {
-  const uuid = flags.item?.uuid;
+function resolveItem(message, itemRef) {
+  const uuid = itemRef?.uuid;
   if (uuid && typeof globalThis.fromUuidSync === "function") {
     try {
       const item = globalThis.fromUuidSync(uuid);
@@ -245,11 +295,11 @@ function resolveItem(message, flags) {
     }
   }
   const actor = typeof message?.getAssociatedActor === "function" ? message.getAssociatedActor() : null;
-  return flags.item?.id ? actor?.items?.get?.(flags.item.id) ?? null : null;
+  return itemRef?.id ? actor?.items?.get?.(itemRef.id) ?? null : null;
 }
 
-function resolveActivity(item, flags) {
-  const id = flags.activity?.id;
+function resolveActivity(item, activityRef) {
+  const id = activityRef?.id;
   if (!id) return null;
   return item?.system?.activities?.get?.(id) ?? null;
 }

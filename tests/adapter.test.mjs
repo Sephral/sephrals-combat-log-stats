@@ -251,6 +251,39 @@ test("dnd5e adapter reads the rolls Ready Set Roll keeps in its flags", () => {
   assert.equal(adapter.rollsChanged({ flags: { rsr5e: { rolls: stored } } }), false);
 });
 
+test("dnd5e adapter reads the typed roll messages of dnd5e 6 (type, item, activity and targets in system data)", () => {
+  const dnd5e = new Dnd5eSystemAdapter();
+  const classify = (message, options = {}) => dnd5e.classifyRoll({ formula: "1d20 + 3", total: 14, options }, message).type;
+  assert.equal(classify({ type: "check", system: { ability: "dex", skill: "ste" } }, { rollType: "check" }), EVENT_TYPES.ROLL_CHECK);
+  assert.equal(classify({ type: "save", system: { type: "death" } }, { rollType: "save" }), EVENT_TYPES.ROLL_SAVE);
+  assert.equal(classify({ type: "check", system: { ability: "dex", type: "initiative" } }), EVENT_TYPES.ROLL_OTHER);
+  assert.equal(classify({ type: "attack", system: {} }), EVENT_TYPES.ROLL_ATTACK);
+  assert.equal(dnd5e.classifyRoll({ formula: "2d4 + 2", total: 7, options: { type: "healing" } }, { type: "damage", system: {} }).type, EVENT_TYPES.ROLL_HEALING);
+
+  const previous = globalThis.fromUuidSync;
+  const bolt = { name: "Fire Bolt", type: "spell", uuid: "Actor.w.Item.bolt", system: { activities: { get: () => ({ type: "attack", attack: { type: { value: "ranged", classification: "spell" } } }) } } };
+  globalThis.fromUuidSync = (uuid) => (uuid === bolt.uuid ? bolt : null);
+  try {
+    const message = { type: "damage", flavor: "Fire Bolt - Damage Roll", system: { item: { id: "bolt", type: "spell", uuid: bolt.uuid }, activity: { id: "act", type: "attack" } } };
+    assert.deepEqual(dnd5e.describeAction(message), { actionName: "Fire Bolt", actionKind: "spell", itemUuid: bolt.uuid, itemType: "spell", activityType: "attack" });
+  } finally {
+    if (previous) globalThis.fromUuidSync = previous;
+    else delete globalThis.fromUuidSync;
+  }
+  // A deleted item still names the action through the snapshot in system.deltas.deleted.
+  const gone = { type: "attack", system: { item: { id: "axe", type: "weapon" }, deltas: { deleted: [{ _id: "axe", name: "Old Axe", type: "weapon", system: { type: { value: "martialM" } } }] } } };
+  assert.equal(dnd5e.describeAction(gone).actionName, "Old Axe");
+
+  const targets = dnd5e.extractMessageTargets({ type: "damage", system: { targets: [
+    { actor: "Scene.s1.Token.t1.Actor.a1", token: "Scene.s1.Token.t1", name: "Orc", ac: 13 },
+    { actor: "Actor.hero", token: "Scene.s1.Token.t2", name: "Hero", ac: 16 },
+    { actor: "Actor.far", token: null, name: "Far Away" }
+  ] } });
+  assert.deepEqual(targets.tokenUuids, ["Scene.s1.Token.t1", "Scene.s1.Token.t2"]);
+  assert.deepEqual(targets.actorUuids, ["Actor.hero", "Actor.far"]);
+  assert.deepEqual(targets.names, ["Orc", "Hero", "Far Away"]);
+});
+
 test("dnd5e adapter takes the card whose button was just clicked, not for the token HUD, a check or an old click", async () => {
   const { __test__ } = await import("../scripts/adapters/dnd5e-adapter.js");
   const dnd5e = new Dnd5eSystemAdapter();

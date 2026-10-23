@@ -2,7 +2,7 @@
   "id": "sephrals-combat-log-stats",
   "title": "Sephral’s Combat Log & Stats",
   "description": "Records every fight round by round: damage, healing, takedowns, close calls and control plays for each combatant, a sortable Impact Meter and player reports for chat, journal or Discord. Exact attribution in D&D 5e.",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "compatibility": {
     "minimum": 13,
     "verified": "14.369"
