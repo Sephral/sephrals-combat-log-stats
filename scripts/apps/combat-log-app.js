@@ -8,6 +8,7 @@ import { awardDetail, awardLabel, computeAwards } from "../services/awards-servi
 import { CombatStatsService } from "../services/stats-service.js";
 import { isCrucibleLog, termKey } from "../services/system-terms.js";
 import { combatantBarChart, roundDamageChart } from "./charts.js";
+import { countFeature } from "../usage.mjs";
 import {
   actionKind, actionName, downState, eventAmount, isAutomaticEffect, isControl, isDamageApplied, isDamageDealt, isDowned,
   isHealingApplied, isMoraleEvent, isOpenAction, isResourceDelta, isSourceAttributed, sourceCombatantId, targetCombatantId
@@ -315,6 +316,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     eventEntry.data.interpretedAs = interpretation;
     eventEntry.confidence = CONFIDENCE.MANUAL;
     eventEntry.data.manualCorrection = true;
+    countFeature(MODULE_ID, "logCorrected");
     await this.saveLog(log);
   }
 
@@ -323,6 +325,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     if (!log || !this.service.setEventSource(log, eventId, combatantId)) return;
     const eventEntry = log.events.find((entry) => entry.id === eventId);
     eventEntry.data.manualCorrection = true;
+    countFeature(MODULE_ID, "logCorrected");
     await this.saveLog(log);
   }
 
@@ -332,6 +335,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     if (!participant) return;
     participant.side = side;
     participant.sideLocked = true;
+    countFeature(MODULE_ID, "logCorrected");
     await this.saveLog(log);
   }
 
@@ -370,6 +374,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     const eventEntry = log?.events?.find((entry) => entry.id === target.dataset.eventId);
     if (!eventEntry) return;
     eventEntry.ignored = true;
+    countFeature(MODULE_ID, "logCorrected");
     await this.saveLog(log);
   }
 
@@ -378,6 +383,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     const eventEntry = log?.events?.find((entry) => entry.id === target.dataset.eventId);
     if (!eventEntry) return;
     eventEntry.ignored = false;
+    countFeature(MODULE_ID, "logCorrected");
     await this.saveLog(log);
   }
 
@@ -396,6 +402,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       ui.notifications?.warn(localize("SCLS.Notification.AdjustmentInvalid"));
       return;
     }
+    countFeature(MODULE_ID, "logCorrected");
     await this.saveLog(log);
     ui.notifications?.info(localize("SCLS.Notification.AdjustmentAdded"));
   }
@@ -405,6 +412,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     if (!log) return;
     applyReportSettings(log, new FormData(target.closest("form")));
     this.playerReports.appendShareEvent(log, log.shareSettings.shareStartedAt === log.shareSettings.shareUpdatedAt ? "created" : "updated", { shareMode: log.shareSettings.shareMode });
+    countFeature(MODULE_ID, "sharingSaved");
     await this.saveLog(log);
     ui.notifications?.info(localize("SCLS.Notification.SharingSaved"));
   }
@@ -434,6 +442,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     if (!log) return;
     applyReportSettings(log, new FormData(target.closest("form")));
     const message = await this.playerReports.postChatSummary(log);
+    if (message) countFeature(MODULE_ID, "reportPosted");
     await this.saveLog(log);
     if (message) ui.notifications?.info(localize("SCLS.Notification.ReportPosted"));
     else ui.notifications?.warn(localize("SCLS.Notification.ReportNotShared"));
@@ -444,6 +453,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     if (!log) return;
     applyReportSettings(log, new FormData(target.closest("form")));
     const entry = await this.playerReports.createJournalReport(log);
+    if (entry) countFeature(MODULE_ID, "journalReport");
     await this.saveLog(log);
     if (entry) {
       ui.notifications?.info(format("SCLS.Notification.JournalCreated", { name: entry.name ?? log.title }));
@@ -457,6 +467,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     if (!log) return;
     const shareSettings = reportSettingsFromForm(log, new FormData(target.closest("form")));
     const messages = this.playerReports.discordMessages(log, { shareSettings });
+    countFeature(MODULE_ID, "discordCopied");
     if (messages.length > 1) {
       await showDiscordParts(messages);
       return;
@@ -470,6 +481,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     const record = this.canEdit(log, { quiet: true });
     if (record) this.exporter.appendExportEvent(log, "json");
     this.exporter.exportJson(log);
+    countFeature(MODULE_ID, "logExported");
     if (record) await this.saveLog(log);
   }
 
@@ -488,6 +500,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     const record = this.canEdit(log, { quiet: true });
     if (record) this.exporter.appendExportEvent(log, "markdown");
     this.exporter.exportMarkdown(log);
+    countFeature(MODULE_ID, "logExported");
     if (record) await this.saveLog(log);
   }
 
@@ -497,6 +510,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     const record = this.canEdit(log, { quiet: true });
     if (record) this.exporter.appendExportEvent(log, "csv");
     this.exporter.exportCsv(log);
+    countFeature(MODULE_ID, "logExported");
     if (record) await this.saveLog(log);
   }
 }

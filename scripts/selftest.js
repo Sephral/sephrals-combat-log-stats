@@ -1,6 +1,7 @@
 import { MODULE_ID, SETTINGS, TESTED_VERSIONS } from "./constants.js";
 import { getSystemAdapter } from "./adapters/adapter-registry.js";
 import { escapeHtml, format, getProperty, localize } from "./utils.js";
+import { countFeature } from "./usage.mjs";
 
 // Self-test: checks what the module relies on in Foundry and the game system. Meant to be run after every update of
 // Foundry or the system; the GM also gets a notice once when a newer version than the verified one is installed.
@@ -57,6 +58,7 @@ function versionLine() {
 
 // Runs the self-test and reports the result as a notification and a whispered chat message.
 export async function runSelfTest(service, { report = true } = {}) {
+  countFeature(MODULE_ID, "selfTestRun");
   const { problems, checks, actor } = await checkIntegrations(service);
   const adapter = getSystemAdapter();
   const support = SUPPORTED_SYSTEMS.includes(adapter.id) ? game.system.title : localize("SCLS.SelfTest.Generic");

@@ -5,6 +5,7 @@ import { canViewCombatLogs } from "./services/player-view-service.js";
 import { getSetting, registerSettings } from "./settings.js";
 import { noticeNewVersions, runSelfTest } from "./selftest.js";
 import { isGM, isTrackingGM, loadModuleTranslations, localize, registerTemplateHelpers } from "./utils.js";
+import { countFeature, markUsed, registerUsage } from "./usage.mjs";
 
 let combatLogService = null;
 let combatLogApp = null;
@@ -17,6 +18,7 @@ export function openCombatLog(logId = null) {
     return null;
   }
   if (!combatLogService) return null;
+  markUsed(MODULE_ID);
   // One window: reopening shows the requested log in the existing window.
   if (combatLogApp?.rendered) {
     combatLogApp.showLog(logId);
@@ -60,6 +62,7 @@ function registerHooks() {
   // Ending a combat deletes the Combat document; core has no separate "combat ended" hook.
   Hooks.on("deleteCombat", track(async (combat) => {
     const log = await combatLogService.deleteCombat(combat);
+    if (log) countFeature(MODULE_ID, "combatLogged");
     if (log && getSetting(SETTINGS.SHOW_SUMMARY_ON_COMBAT_END, true)) openCombatLog(log.id);
   }));
 
@@ -128,6 +131,10 @@ function applyPlayerAccessChange() {
 
 Hooks.once("init", () => {
   registerSettings();
+  registerUsage(MODULE_ID, {
+    features: ["combatLogged", "logCorrected", "sharingSaved", "reportPosted", "journalReport", "discordCopied", "logExported", "selfTestRun"],
+    settings: [SETTINGS.DEFAULT_SHARE_MODE, SETTINGS.DEFAULT_DPR_METHOD, SETTINGS.PLAYER_STATS_ACCESS]
+  });
   registerTemplateHelpers();
   registerHooks();
 });
