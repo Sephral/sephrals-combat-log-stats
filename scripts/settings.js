@@ -1,4 +1,5 @@
 import { DEFAULT_RESOURCE_PATHS, DPR_METHODS, HOOKS, LANGUAGE_MODES, MODULE_ID, SETTINGS, SHARE_MODES } from "./constants.js";
+import { selfTestMenuClass } from "./selftest.js";
 
 // Order is the order in Foundry's settings dialog. Language comes first, like in the other Sephral modules.
 const SETTING_DEFINITIONS = [
@@ -24,7 +25,8 @@ const SETTING_DEFINITIONS = [
   [SETTINGS.TRACK_ROLLS, { scope: "world", config: false, type: Boolean, default: true }],
   [SETTINGS.TRACK_RESOURCE_DELTAS, { scope: "world", config: false, type: Boolean, default: true }],
   [SETTINGS.RESOURCE_DELTA_WINDOW_MS, { scope: "world", config: false, type: Number, default: 60000 }],
-  [SETTINGS.RESOURCE_PATHS, { scope: "world", config: false, type: Object, default: DEFAULT_RESOURCE_PATHS }]
+  [SETTINGS.RESOURCE_PATHS, { scope: "world", config: false, type: Object, default: DEFAULT_RESOURCE_PATHS }],
+  [SETTINGS.ACKNOWLEDGED_VERSIONS, { scope: "client", config: false, type: String, default: "" }]
 ];
 
 export function settingDefinition(key) {
@@ -39,6 +41,16 @@ export function registerSettings() {
       ...definition
     });
   }
+  // The unit tests register the settings without Foundry's application classes.
+  if (!globalThis.foundry?.applications?.api || typeof game.settings.registerMenu !== "function") return;
+  game.settings.registerMenu(MODULE_ID, "selfTest", {
+    name: "SCLS.SelfTest.Title",
+    label: "SCLS.SelfTest.Run",
+    hint: "SCLS.SelfTest.Hint",
+    icon: "fa-solid fa-stethoscope",
+    type: selfTestMenuClass(() => game.modules.get(MODULE_ID).api?.service),
+    restricted: true
+  });
 }
 
 export function getSetting(key, fallback = null) {

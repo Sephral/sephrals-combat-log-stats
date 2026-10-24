@@ -3,6 +3,7 @@ import { CombatLogApp } from "./apps/combat-log-app.js";
 import { CombatLogService } from "./services/combat-log-service.js";
 import { canViewCombatLogs } from "./services/player-view-service.js";
 import { getSetting, registerSettings } from "./settings.js";
+import { noticeNewVersions, runSelfTest } from "./selftest.js";
 import { isGM, isTrackingGM, loadModuleTranslations, localize, registerTemplateHelpers } from "./utils.js";
 
 let combatLogService = null;
@@ -165,5 +166,6 @@ Hooks.once("ready", async () => {
     combatLogService?.stashPendingSaves();
     void combatLogService?.flushPendingSaves();
   });
-  game.modules.get(MODULE_ID).api = { openCombatLog, service: combatLogService };
+  game.modules.get(MODULE_ID).api = { openCombatLog, service: combatLogService, runSelfTest: (options) => runSelfTest(combatLogService, options) };
+  noticeNewVersions();
 });

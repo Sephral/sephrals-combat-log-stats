@@ -176,3 +176,38 @@ export function downloadData(filename, data, mimeType = "application/json") {
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
+
+// Opens Foundry's settings on the tab of this module.
+export async function openModuleSettings() {
+  const sheet = game.settings.sheet;
+  await sheet.render({ force: true });
+  try {
+    sheet.changeTab(MODULE_ID, "categories");
+  } catch (error) {
+    console.warn(`${MODULE_ID} | The settings have no tab for this module`, error);
+  }
+  sheet.bringToFront?.();
+}
+
+// Puts a gear into the title bar of a window that opens the module settings. Players only get it when the module
+// has settings for them.
+export function addSettingsGear(frame) {
+  const header = frame?.querySelector(".window-header");
+  if (!header || header.querySelector(".scls-settings")) return;
+  const own = (setting) => setting.namespace === MODULE_ID && setting.config && setting.scope !== "world";
+  if (!isGM() && ![...game.settings.settings.values()].some(own)) return;
+  const label = localize("SCLS.App.Settings");
+  const gear = document.createElement("button");
+  gear.type = "button";
+  gear.className = "header-control icon fa-solid fa-gear scls-settings";
+  gear.dataset.tooltip = label;
+  gear.setAttribute("aria-label", label);
+  gear.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openModuleSettings();
+  });
+  const anchor = header.querySelector("[data-action=toggleControls]") ?? header.querySelector("[data-action=close]");
+  if (anchor) anchor.before(gear);
+  else header.append(gear);
+}

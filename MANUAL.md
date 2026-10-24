@@ -151,8 +151,11 @@ Excel with German regional settings expects semicolons in CSV files. Import the 
 | Create journal report when combat ends | world | Create the journal report automatically |
 | History retention days | world | Remove ended logs older than this, 0 keeps all |
 | Debug logging | you | Extra console output for troubleshooting |
+| Self test | GM | Checks the connection to Foundry and the game system and the stored combat logs |
 
-*Follow Foundry* uses Foundry's language, including community translations.
+*Follow Foundry* uses Foundry's language, including community translations. The gear in the title bar of the window opens these settings.
+
+Run the self test after every update of Foundry or the game system. When a newer version than the tested one is installed, the GM gets a notice once.
 
 ## Where combat logs are kept
 

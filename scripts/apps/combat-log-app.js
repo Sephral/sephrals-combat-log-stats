@@ -1,6 +1,6 @@
 import { CONFIDENCE, EVENT_TYPES, HOOKS, LOG_STATUS, MODULE_ID, RESOURCE_INTERPRETATIONS, SETTINGS, SHARE_MODES, SIDES, SOURCE_KINDS, TABS } from "../constants.js";
 import { getSetting } from "../settings.js";
-import { downloadData, escapeHtml, format, formatDateTime, formatDuration, isTrackingGM, localize, renderAppTemplate } from "../utils.js";
+import { addSettingsGear, downloadData, escapeHtml, format, formatDateTime, formatDuration, isTrackingGM, localize, renderAppTemplate } from "../utils.js";
 import { CombatLogExportService } from "../services/export-service.js";
 import { canWriteCombatLogs, effectiveShareMode, playerHistoryEntry, playerShareSettings, playerTabs, playerViewLog, SHAREABLE_MODES } from "../services/player-view-service.js";
 import { formatNumber, normalizeReportSections, PlayerReportService, REPORT_SECTIONS, reportSectionsWithContent, shareOptionAvailability } from "../services/player-report-service.js";
@@ -234,6 +234,12 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       rows.push(playerHistoryEntry(entry, log, options));
     }
     return historyRows(rows, selectedLogId);
+  }
+
+  async _renderFrame(options) {
+    const frame = await super._renderFrame(options);
+    addSettingsGear(frame);
+    return frame;
   }
 
   async _onRender(context, options) {

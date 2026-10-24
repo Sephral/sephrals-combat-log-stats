@@ -1,6 +1,8 @@
 export const MODULE_ID = "sephrals-combat-log-stats";
 export const MODULE_TITLE = "Sephral’s Combat Log & Stats";
 export const SCHEMA_VERSION = 1;
+// The versions the module was verified against (see the self-test).
+export const TESTED_VERSIONS = Object.freeze({ core: "14.369", dnd5e: "6.0.6", crucible: "0.11.2" });
 
 export const HOOKS = Object.freeze({
   LOG_UPDATED: `${MODULE_ID}.logUpdated`,
@@ -35,7 +37,8 @@ export const SETTINGS = Object.freeze({
   RETENTION_DAYS: "retentionDays",
   RESOURCE_PATHS: "resourcePaths",
   LANGUAGE: "language",
-  DEBUG_MODE: "debugMode"
+  DEBUG_MODE: "debugMode",
+  ACKNOWLEDGED_VERSIONS: "acknowledgedVersions"
 });
 
 export const LOG_STATUS = Object.freeze({
