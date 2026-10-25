@@ -157,6 +157,19 @@ Excel with German regional settings expects semicolons in CSV files. Import the 
 
 Run the self test after every update of Foundry or the game system. When a newer version than the tested one is installed, the GM gets a notice once.
 
+## Usage statistics
+
+The module can take part in a small usage report shared by all of Sephral’s modules. Nothing is counted or sent until the GM agrees: shortly after the world starts, the active GM is asked, and the question comes back at every start until there is an answer. The answer counts for all of Sephral’s modules in the world. *Share usage statistics* in the module settings turns the report on or off at any time, and *Manage statistics* below it shows what the report contains right now.
+
+With the GM’s consent only the active GM’s browser counts, and it sends at most one report a day. The question lists everything the report contains, from the Foundry version to a random world ID. For Combat Log & Stats it holds:
+
+* on how many of the last 30 days the module was used
+* how often combats are logged, a log is corrected, sharing options are saved, reports are posted to the chat, written to a journal or copied for Discord, logs are exported and the self test runs
+* the settings *Default report detail*, *Damage per round basis* and *Players can view combat statistics* (only the chosen option)
+* where errors occur in the module code: file, line and error type, never the error message
+
+No names, chat messages, notes, dice results or other content of the world are sent.
+
 ## Where combat logs are kept
 
 Combat logs are saved inside your world. They are never written into actors, items, scenes, chat messages or compendia, and chat text is not stored.
