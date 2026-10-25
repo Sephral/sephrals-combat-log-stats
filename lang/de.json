@@ -459,7 +459,7 @@
   "SCLS.Crucible.Label.NoCorrections": "Nichts zu prüfen. Jede Änderung an Gesundheit und Moral ist zugeordnet.",
   "SCLS.Crucible.Label.AutomaticCorrections": "Schaden, Heilung und Ziele stammen aus bestätigten Aktionskarten und Änderungen an Gesundheit und Moral. Dieser Tab zeigt nur Einträge, die noch geprüft werden sollten."
 ,
-  "SCLS.SelfTest.Title": "Combat Log & Stats Selbsttest",
+  "SCLS.SelfTest.Title": "Selbsttest von Combat Log & Stats",
   "SCLS.SelfTest.Run": "Selbsttest starten",
   "SCLS.SelfTest.Hint": "Prüft die Anbindung an Foundry und dein Spielsystem und die gespeicherten Kampfprotokolle. Nach jedem Update von Foundry oder dem System ausführen.",
   "SCLS.SelfTest.Passed": "Selbsttest bestanden: {checks} Prüfungen, Systemanbindung {system}.",
