@@ -4,7 +4,7 @@ import { getProperty, numberOrNull } from "../utils.js";
 import { GenericSystemAdapter, rollClassNames } from "./generic-adapter.js";
 
 // Crucible 0.11 keeps four pools that matter in a fight. Health overflows into wounds, morale into madness
-// (only for heroes and important adversaries). See knowledge/crucible/data-model.md.
+// (only for heroes and important adversaries).
 const PATHS = Object.freeze({
   health: "system.resources.health.value",
   wounds: "system.resources.wounds.value",
