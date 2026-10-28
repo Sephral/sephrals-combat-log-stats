@@ -179,7 +179,9 @@ export const SHARE_MODES = Object.freeze({
   PUBLIC_REPORT: "publicReport"
 });
 
-export const TABS = Object.freeze(["history", "summary", "timeline", "statistics", "dpr", "corrections", "participants", "sharing"]);
+export const TABS = Object.freeze(["history", "sessions", "summary", "timeline", "statistics", "dpr", "corrections", "participants", "sharing"]);
+// Tabs about all fights. The others show the selected fight.
+export const OVERVIEW_TABS = Object.freeze(["history", "sessions"]);
 // Tabs that change a log or hand it out. Players never get them.
 export const GM_TABS = Object.freeze(["corrections", "sharing"]);
 

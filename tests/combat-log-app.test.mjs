@@ -174,19 +174,19 @@ test("history rows format combat index entries and mark the selected log", () =>
 test("tab navigation separates history selection from combat detail pages", () => {
   const result = __test__.tabNavigation(true, "summary");
 
-  assert.equal(result.historyTab.id, "history");
+  assert.deepEqual(result.overviewTabs.map((tab) => tab.id), ["history", "sessions"]);
   assert.equal(result.showConnector, true);
   assert.equal(result.connectorIcon, "fa-solid fa-angles-right");
   assert.equal(result.detailTabs.some((tab) => tab.id === "summary" && tab.active), true);
-  assert.equal(result.detailTabs.some((tab) => tab.id === "history"), false);
+  assert.equal(result.detailTabs.some((tab) => tab.id === "history" || tab.id === "sessions"), false);
   assert.equal(result.detailTabs.some((tab) => tab.id === "raw"), false);
   assert.equal(result.detailTabs.some((tab) => tab.id === "export"), false);
 });
 
-test("tab navigation shows only history when no combat is selected", () => {
+test("tab navigation shows only history and sessions when no combat is selected", () => {
   const result = __test__.tabNavigation(false, "history");
 
-  assert.equal(result.historyTab.id, "history");
+  assert.deepEqual(result.overviewTabs.map((tab) => tab.id), ["history", "sessions"]);
   assert.equal(result.showConnector, false);
   assert.deepEqual(result.detailTabs, []);
 });

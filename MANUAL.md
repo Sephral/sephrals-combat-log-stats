@@ -10,7 +10,7 @@ This manual covers the details. For a quick overview see the [README](README.md)
 4. When you end the combat, the summary opens (can be turned off).
 5. Check the Corrections tab for hit point changes the log could not explain, then share a report from the Sharing tab.
 
-The window has the tabs Summary, Round Log, Statistics, Impact Meter, Corrections, Participants, History and Sharing. In a narrow window the tabs show their icons only. Point at an icon to see the name of its tab.
+The window has the tabs History and Sessions for all fights, and Summary, Round Log, Statistics, Impact Meter, Corrections, Participants and Sharing for the selected fight. In a narrow window the tabs show their icons only. Point at an icon to see the name of its tab.
 
 Only one GM records at a time. With a second GM or an assistant logged in, nothing is recorded twice. When the recording GM leaves, the next GM continues the running logs.
 
@@ -75,6 +75,19 @@ The Summary tab hands out awards to party members. Enemies never get an award.
 
 An award only appears when somebody earned it. Party members with the same result share it.
 
+## Sessions
+
+The Sessions tab adds up the fights of one game session, or of all sessions at once. Fights less than 6 hours apart count as one session, also past midnight. A fight that continues in a later session counts for the session in which it started. The latest session is selected, the list at the top switches to an older one or to *All sessions*.
+
+* **Totals:** fights, rounds, time in combat, damage and healing of all combatants, enemies defeated, party members down and critical hits. Time in combat leaves out breaks of more than 30 minutes.
+* **Party vs. enemies:** damage dealt, damage per round, damage taken, healing, how often each side went down, critical hits, fumbles and control plays, side by side with the party's share as a bar. In Crucible morale damage as well.
+* **Damage per fight:** a chart of the party's and the enemies' damage in every fight of the session. With *All sessions* it shows one pair of columns per session.
+* **Party members:** every party member with fights, damage dealt, damage per round, damage taken, healing, takedowns, times downed and critical hits over all selected fights. A character counts as the same member in every fight through its actor.
+* **Awards:** the awards of the fights, for the whole session.
+* **Fights:** every fight of the session with its numbers. *Select* opens it. With *All sessions* the list shows the sessions instead.
+
+*Post to Chat* and *Copy for Discord* share the session as a short recap. Both use only what players may see of each fight, with the sharing choices of that fight, and posting needs *Allow player reports*.
+
 ## Corrections
 
 The Corrections tab lists every hit point change the log could not explain. The GM can reclassify unclear changes, set the source of damage nobody claimed, add or reduce damage and healing by hand and ignore entries.
@@ -101,6 +114,7 @@ With *Players can view combat statistics* turned on (the default), players get t
 
 | Tab | What players see |
 | --- | --- |
+| Sessions | the sessions with the numbers of each fight as they see it there. Enemy numbers only appear when every fight of the selection shares them, otherwise the totals are the party's |
 | History | every recorded fight with its rounds, the combatants they may see, party damage and party damage per round. No delete button |
 | Summary | the key numbers and the awards, without the count of corrections and without the GM hints |
 | Round Log | the actions round by round, only when the report detail of the fight is *Full recap* or *Public report*. Open action cards and manual changes of the GM are left out, they only count in the numbers |

@@ -235,8 +235,8 @@ test("logs without saved choices follow the module defaults", () => {
 });
 
 test("players get no Corrections or Sharing tab, and the Round Log only with action details", () => {
-  assert.deepEqual(playerTabs({ roundLog: true }), ["history", "summary", "timeline", "statistics", "dpr", "participants"]);
-  assert.deepEqual(playerTabs({ roundLog: false }), ["history", "summary", "statistics", "dpr", "participants"]);
+  assert.deepEqual(playerTabs({ roundLog: true }), ["history", "sessions", "summary", "timeline", "statistics", "dpr", "participants"]);
+  assert.deepEqual(playerTabs({ roundLog: false }), ["history", "sessions", "summary", "statistics", "dpr", "participants"]);
 });
 
 test("history rows for players count visible combatants and party damage only", () => {
@@ -268,11 +268,11 @@ test("every action that changes, hands out or exports a log refuses players", as
     persistence: { loadLog: record("loadLog"), loadActiveLogs: async () => [] }
   };
   const app = new CombatLogApp(service, "log-1");
-  const readOnlyActions = ["switchTab", "openLog", "sortDpr"];
+  const readOnlyActions = ["switchTab", "openLog", "selectSession", "sortDpr"];
   const actions = Object.entries(CombatLogApp.DEFAULT_OPTIONS.actions).filter(([name]) => !readOnlyActions.includes(name));
   assert.deepEqual(actions.map(([name]) => name).sort(), [
-    "addAdjustment", "copyDiscordReport", "createJournalReport", "deleteLog", "exportCsv", "exportDebug", "exportJson",
-    "exportMarkdown", "ignoreEvent", "postPlayerReport", "renameLog", "restoreEvent", "saveSharing", "stopSharing"
+    "addAdjustment", "copyDiscordReport", "copySessionDiscord", "createJournalReport", "deleteLog", "exportCsv", "exportDebug", "exportJson",
+    "exportMarkdown", "ignoreEvent", "postPlayerReport", "postSessionReport", "renameLog", "restoreEvent", "saveSharing", "stopSharing"
   ]);
   warnings.length = 0;
   await asPlayer(async () => {
@@ -312,7 +312,7 @@ test("the window prepares the player view: read only, no GM tabs and nothing the
   assert.equal(context.readOnly, true);
   assert.equal(context.enemyStats, false);
   assert.equal(context.activeTab, "summary");
-  assert.deepEqual(context.tabs.map((tab) => tab.id), ["history", "summary", "timeline", "statistics", "dpr", "participants"]);
+  assert.deepEqual(context.tabs.map((tab) => tab.id), ["history", "sessions", "summary", "timeline", "statistics", "dpr", "participants"]);
   for (const key of ["sharing", "correctionEvents", "manualAdjustmentEvents", "participantOptions", "reportSectionOptions"]) assert.equal(key in context, false, key);
   assert.equal(context.netDamageLabel, english["SCLS.Label.PartyNetDamage"]);
   assert.equal(context.charts.roundLegend.length, 1);

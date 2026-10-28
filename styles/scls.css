@@ -1217,9 +1217,110 @@ p.scls-share-status.is-shared {
   background: var(--scls-chart-healing);
 }
 
+/* Sessions tab: one game session or all of them, the party against the enemies */
+.scls-session-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+  margin-top: 0.65rem;
+}
+
+.scls-session-select {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: min(100%, 18rem);
+}
+
+.scls-session-select span {
+  color: var(--scls-muted);
+  font-size: 0.78rem;
+}
+
+.scls-panel .scls-session-range {
+  margin: 0.45rem 0 0.6rem;
+}
+
+.scls-session-layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  gap: 0.75rem;
+  align-items: start;
+  margin-top: 0.75rem;
+}
+
+.scls-session-layout h4 {
+  margin-top: 0;
+}
+
+.scls-session-layout .scls-session-chart--wide {
+  grid-column: 1 / -1;
+}
+
+.scls-versus-table {
+  min-width: 0;
+}
+
+.scls-versus-table th[scope="row"] {
+  color: inherit;
+  font-size: 0.85rem;
+  text-transform: none;
+  background: none;
+  font-weight: normal;
+}
+
+.scls-versus-table .scls-versus__party,
+.scls-versus-table .scls-versus__enemies {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.scls-versus-table .scls-versus__party {
+  text-align: right;
+}
+
+.scls-versus-table .scls-versus__cell {
+  width: 40%;
+  vertical-align: middle;
+}
+
+/* The party's share of both sides, the rest of the bar is the enemies'. */
+.scls-versus {
+  display: block;
+  min-width: 5rem;
+  height: 0.6rem;
+  border-radius: 999px;
+  background: var(--scls-chart-enemies);
+  overflow: hidden;
+}
+
+.scls-versus i {
+  display: block;
+  width: var(--scls-share, 50%);
+  height: 100%;
+  background: var(--scls-chart-party);
+  box-shadow: 1px 0 0 var(--scls-surface);
+}
+
+.scls-versus.is-empty {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.scls-versus.is-empty i {
+  width: 0;
+}
+
+.scls-panel .scls-session-hint {
+  margin: 0.75rem 0 0;
+  font-size: 0.78rem;
+}
+
 @media (forced-colors: active) {
   .scls-chart__bar,
-  .scls-chart__swatch {
+  .scls-chart__swatch,
+  .scls-versus {
     forced-color-adjust: none;
   }
 }

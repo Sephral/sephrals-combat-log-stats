@@ -147,6 +147,8 @@ function publicParticipant(participant, visible, share) {
     // A portrait would give an anonymized enemy away.
     img: anonymized ? UNKNOWN_IMAGE : (participant.img || UNKNOWN_IMAGE),
     side: visible.side,
+    // The Sessions tab finds party members of different fights by their actor. Enemies keep theirs to themselves.
+    actorUuid: visible.side === SIDES.FRIENDLY ? String(participant.actorUuid ?? "") : "",
     hidden: Boolean(participant.hidden),
     initiative: participant.initiative ?? null,
     isPlayerOwned: Boolean(participant.isPlayerOwned)

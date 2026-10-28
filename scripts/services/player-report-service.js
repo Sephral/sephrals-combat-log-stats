@@ -800,8 +800,13 @@ function toNumber(value) {
   return Number(value) || 0;
 }
 
+// A name that the Discord text sets in bold (see discordText).
+export function markedName(name) {
+  return `${NAME_START}${name}${NAME_END}`;
+}
+
 // Escapes Discord formatting characters and keeps @everyone and @here from pinging, then bolds the marked names.
-function discordText(value) {
+export function discordText(value) {
   return String(value ?? "")
     .replace(/[\\*_~`|<>[\]]/g, "\\$&")
     .replace(/@(everyone|here)/gi, "@\u200b$1")

@@ -22,20 +22,17 @@ const MIN_ROLLS_FOR_LOW_AVERAGE = 3;
  * @param {{id: string, name: string}[]} input.members   Party members that may win
  * @param {object[]} input.rows      Statistics rows per combatant (computed.byCombatant)
  * @param {object[]} input.events    Events that may be told (rolls for luck, healing for clutch saves)
+ * @param {{rolls: Map, rescues: Map}} [input.tallies]  Rolls and rescues already counted per member (a session adds
+ *   up the tallies of its fights, whose events know other combatant ids); replaces events
  * @returns {{key: string, icon: string, winners: {id: string, name: string}[], value: number, details: object}[]}
  */
-export function computeAwards({ members = [], rows = [], events = [] } = {}) {
+export function computeAwards({ members = [], rows = [], events = [], tallies = null } = {}) {
   const party = members.filter((member) => member?.id);
   if (!party.length) return [];
   const ids = new Set(party.map((member) => member.id));
   const row = (id) => rows.find((entry) => String(entry?.id) === id) ?? {};
   const number = (value) => Math.max(0, Number(value) || 0);
-  const rolls = rollSummary(events, ids);
-  const rescues = new Map();
-  for (const rescue of rescueIncidents(events)) {
-    if (!ids.has(rescue.sourceId) || !ids.has(rescue.targetId) || rescue.sourceId === rescue.targetId) continue;
-    rescues.set(rescue.sourceId, (rescues.get(rescue.sourceId) ?? 0) + 1);
-  }
+  const { rolls, rescues } = tallies ?? awardTallies(events, ids);
 
   const awards = [];
   const add = (key, scoreOf, { details = () => ({}), tieBreak = null, eligible = () => true } = {}) => {
@@ -88,6 +85,16 @@ export function computeAwards({ members = [], rows = [], events = [] } = {}) {
   return awards;
 }
 
+// Rolls (critical hits, fumbles, average result) and allies brought back of every party member, by combatant id.
+export function awardTallies(events = [], ids = new Set()) {
+  const rescues = new Map();
+  for (const rescue of rescueIncidents(events)) {
+    if (!ids.has(rescue.sourceId) || !ids.has(rescue.targetId) || rescue.sourceId === rescue.targetId) continue;
+    rescues.set(rescue.sourceId, (rescues.get(rescue.sourceId) ?? 0) + 1);
+  }
+  return { rolls: rollSummary(events, ids), rescues };
+}
+
 // Critical hits, fumbles and the average natural result (0 to 1) of every party member's tests.
 function rollSummary(events, ids) {
   const summary = new Map();
@@ -131,7 +138,7 @@ export function awardDetail(award) {
     case "healer": return format("SCLS.Award.Detail.healer", { amount: count });
     case "sponge": return format("SCLS.Award.Detail.sponge", { amount: count });
     case "unlucky":
-      if (award.details?.lowRolls) return localize("SCLS.Award.Detail.unluckyLow");
+      if (award.details?.lowRolls) return localize(award.details.lowRollsKey ?? "SCLS.Award.Detail.unluckyLow");
       return format(value === 1 ? "SCLS.Award.Detail.unluckyOne" : "SCLS.Award.Detail.unluckyOther", { count });
     case "control":
     case "takedowns":

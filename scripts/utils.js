@@ -54,6 +54,35 @@ export function formatDateTime(value) {
   }
 }
 
+const DAY_FORMAT = Object.freeze({ weekday: "short", year: "numeric", month: "short", day: "numeric" });
+
+// "Sat, Oct 24, 2026", or a range when the two times differ ("Sat, Oct 24 – Sun, Oct 25, 2026"). time adds the
+// hours ("Sat, Oct 24, 2026, 7:05 – 11:40 PM").
+export function formatDateRange(start, end = start, { time = false } = {}) {
+  const from = new Date(start);
+  const to = new Date(end ?? start);
+  if (Number.isNaN(from.getTime())) return "";
+  const options = time ? { ...DAY_FORMAT, hour: "numeric", minute: "2-digit" } : DAY_FORMAT;
+  try {
+    const formatter = new Intl.DateTimeFormat(activeLocale(), options);
+    if (Number.isNaN(to.getTime()) || typeof formatter.formatRange !== "function") return formatter.format(from);
+    return formatter.formatRange(from, to);
+  } catch {
+    return from.toLocaleDateString();
+  }
+}
+
+// "10/24" or "24.10." for chart axes.
+export function formatShortDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  try {
+    return new Intl.DateTimeFormat(activeLocale(), { month: "numeric", day: "numeric" }).format(date);
+  } catch {
+    return `${date.getMonth() + 1}/${date.getDate()}`;
+  }
+}
+
 export function formatDuration(ms) {
   const totalSeconds = Math.max(0, Math.floor(Number(ms ?? 0) / 1000));
   const hours = Math.floor(totalSeconds / 3600);

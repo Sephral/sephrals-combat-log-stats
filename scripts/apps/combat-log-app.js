@@ -1,13 +1,15 @@
-import { CONFIDENCE, EVENT_TYPES, HOOKS, LOG_STATUS, MODULE_ID, RESOURCE_INTERPRETATIONS, SETTINGS, SHARE_MODES, SIDES, SOURCE_KINDS, TABS } from "../constants.js";
+import { CONFIDENCE, EVENT_TYPES, HOOKS, LOG_STATUS, MODULE_ID, OVERVIEW_TABS, RESOURCE_INTERPRETATIONS, SETTINGS, SHARE_MODES, SIDES, SOURCE_KINDS, TABS } from "../constants.js";
 import { getSetting } from "../settings.js";
 import { addSettingsGear, downloadData, escapeHtml, format, formatDateTime, formatDuration, isTrackingGM, localize, renderAppTemplate } from "../utils.js";
 import { CombatLogExportService } from "../services/export-service.js";
 import { canWriteCombatLogs, effectiveShareMode, playerHistoryEntry, playerShareSettings, playerTabs, playerViewLog, SHAREABLE_MODES } from "../services/player-view-service.js";
 import { formatNumber, normalizeReportSections, PlayerReportService, REPORT_SECTIONS, reportSectionsWithContent, shareOptionAvailability } from "../services/player-report-service.js";
 import { awardDetail, awardLabel, computeAwards } from "../services/awards-service.js";
+import { ALL_SESSIONS, groupSessions, renderSessionHtml, sessionDiscordMessages, sessionReport, sessionRows, sessionTitle, summarizeFights } from "../services/session-service.js";
 import { CombatStatsService } from "../services/stats-service.js";
 import { isCrucibleLog, termKey } from "../services/system-terms.js";
 import { combatantBarChart, roundDamageChart } from "./charts.js";
+import { sessionPanel } from "./session-panel.js";
 import { countFeature } from "../usage.mjs";
 import {
   actionKind, actionName, downState, eventAmount, isAutomaticEffect, isControl, isDamageApplied, isDamageDealt, isDowned,
@@ -31,12 +33,15 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       icon: "fa-solid fa-chart-line",
       resizable: true
     },
-    // Players may switch tabs, open a log and sort the Impact Meter. Everything else changes, hands out or exports
-    // a log and refuses them (gmOnly), also when such a button ends up in their window.
+    // Players may switch tabs, open a log or a session and sort the Impact Meter. Everything else changes, hands out
+    // or exports a log and refuses them (gmOnly), also when such a button ends up in their window.
     actions: {
       switchTab: CombatLogApp.#onTab,
       openLog: CombatLogApp.#onOpenLog,
+      selectSession: CombatLogApp.#onSelectSession,
       sortDpr: CombatLogApp.#onSortDpr,
+      postSessionReport: gmOnly(CombatLogApp.#onPostSessionReport),
+      copySessionDiscord: gmOnly(CombatLogApp.#onCopySessionDiscord),
       ignoreEvent: gmOnly(CombatLogApp.#onIgnoreEvent),
       restoreEvent: gmOnly(CombatLogApp.#onRestoreEvent),
       saveSharing: gmOnly(CombatLogApp.#onSaveSharing),
@@ -62,6 +67,8 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     this.exporter = new CombatLogExportService();
     this.playerReports = new PlayerReportService();
     this.dprSort = { key: "damageAppliedNet", direction: "desc" };
+    // The session shown in the Sessions tab; null follows the latest one.
+    this.sessionId = null;
     this.liveRenderQueued = false;
     this.onLogUpdated = (log) => this.scheduleLiveRender(log);
     globalThis.Hooks?.on?.(HOOKS.LOG_UPDATED, this.onLogUpdated);
@@ -155,12 +162,13 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     const log = share ? playerViewLog(stored, { statsOptions: this.statsOptions(), share }) : stored;
     this.renderedLog = log;
     const tabIds = readOnly ? playerTabs({ roundLog: share?.roundLog ?? true }) : TABS;
-    // The tab first: the player history rows depend on it.
-    if (!log) this.activeTab = "history";
-    else if (!tabIds.includes(this.activeTab)) this.activeTab = "summary";
+    // The tab first: the player history rows and the sessions depend on it.
+    if (!log && !OVERVIEW_TABS.includes(this.activeTab)) this.activeTab = "history";
+    else if (log && !tabIds.includes(this.activeTab)) this.activeTab = "summary";
     const historyEntries = await this.service.persistence.loadHistoryEntries();
     const rows = await this.historyRowsFor(historyEntries, log?.id ?? "", readOnly);
     const historyDamageLabel = localize(readOnly ? "SCLS.Label.PartyNetDamage" : "SCLS.Label.NetDamage");
+    const sessions = await this.sessionsFor(historyEntries, readOnly);
     if (!log) {
       return {
         readOnly,
@@ -170,7 +178,8 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
         tabs: visibleTabs(false, this.activeTab, tabIds),
         tabNavigation: tabNavigation(false, this.activeTab, tabIds),
         historyRows: rows,
-        historyDamageLabel
+        historyDamageLabel,
+        sessions
       };
     }
     const computed = log.computed ?? {};
@@ -190,6 +199,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       tabNavigation: tabNavigation(true, this.activeTab, tabIds),
       historyRows: rows,
       historyDamageLabel,
+      sessions,
       netDamageLabel: damageLabel,
       netHealingLabel: healingLabel,
       summary: summaryContext(log),
@@ -237,6 +247,42 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     return historyRows(rows, selectedLogId);
   }
 
+  // The Sessions tab adds up every stored fight, so it is built only while the tab is open. Players get the numbers
+  // of their view of each fight, the GM those of the current settings.
+  async sessionsFor(entries, readOnly) {
+    if (this.activeTab !== "sessions") return null;
+    const logs = await this.allLogs(entries, { playerView: readOnly });
+    return {
+      ...sessionPanel(logs, { selectedId: this.sessionId, statsOptions: this.statsOptions() }),
+      sharingEnabled: getSetting(SETTINGS.ENABLE_PLAYER_SHARING, true) !== false
+    };
+  }
+
+  // Every stored fight with its numbers. playerView: each fight as players may see it (player-view-service.js).
+  async allLogs(entries, { playerView = false } = {}) {
+    const options = { statsOptions: this.statsOptions() };
+    const logs = [];
+    for (const entry of entries ?? []) {
+      if (!entry.loaded) continue;
+      const log = !playerView && this.service.getLog ? await this.service.getLog(entry.combatLogId) : await this.service.persistence.loadLog(entry.combatLogId);
+      if (log) logs.push(playerView ? playerViewLog(log, options) : log);
+    }
+    return logs;
+  }
+
+  // The selected session for chat or Discord, told from what players may see of each of its fights.
+  async sessionReportFor({ markNames = false } = {}) {
+    const logs = await this.allLogs(await this.service.persistence.loadHistoryEntries());
+    const sessions = groupSessions(logs);
+    if (!sessions.length) return null;
+    const all = this.sessionId === ALL_SESSIONS;
+    const selected = all ? null : sessions.find((session) => session.id === this.sessionId) ?? sessions[0];
+    const ids = new Set((all ? logs : selected.logs).map((log) => log.id));
+    const options = { statsOptions: this.statsOptions() };
+    const summary = summarizeFights(logs.filter((log) => ids.has(log.id)).map((log) => playerViewLog(log, options)), options);
+    return sessionReport(summary, { title: sessionTitle(selected), sessions: all ? sessionRows(summary, sessions) : null, markNames });
+  }
+
   async _renderFrame(options) {
     const frame = await super._renderFrame(options);
     addSettingsGear(frame);
@@ -246,7 +292,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
   async _onRender(context, options) {
     await super._onRender(context, options);
     for (const panel of this.element.querySelectorAll("[data-panel]")) panel.hidden = panel.dataset.panel !== this.activeTab;
-    for (const element of this.element.querySelectorAll("[data-detail-only]")) element.hidden = this.activeTab === "history";
+    for (const element of this.element.querySelectorAll("[data-detail-only]")) element.hidden = OVERVIEW_TABS.includes(this.activeTab);
     applyButtonTooltips(this.element.closest(".scls-window") ?? this.element);
     this.observeTabWidth();
     for (const select of this.element.querySelectorAll("select[data-scls-action]")) {
@@ -284,7 +330,8 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
   }
 
   scheduleLiveRender(log) {
-    if (this.logId && log?.id !== this.logId) return;
+    // The Sessions tab adds up every fight, the other tabs show one.
+    if (this.activeTab !== "sessions" && this.logId && log?.id !== this.logId) return;
     this.scheduleRefresh();
   }
 
@@ -299,8 +346,13 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
   }
 
   async handleSelectChange(event) {
-    if (!this.canEdit(null)) return null;
     const target = event.currentTarget;
+    // Choosing a session changes nothing, players may do it too.
+    if (target.dataset.sclsAction === "selectSession") {
+      this.sessionId = target.value || null;
+      return this.render();
+    }
+    if (!this.canEdit(null)) return null;
     switch (target.dataset.sclsAction) {
       case "classify": return this.classifyEvent(target.dataset.eventId, target.value);
       case "setSource": return this.setEventSource(target.dataset.eventId, target.value);
@@ -348,6 +400,38 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     this.logId = target.dataset.logId;
     this.activeTab = "summary";
     await this.render();
+  }
+
+  static async #onSelectSession(_event, target) {
+    this.sessionId = target.dataset.sessionId || null;
+    this.activeTab = "sessions";
+    await this.render();
+  }
+
+  // Needs "Allow player reports", like the player report of a fight.
+  static async #onPostSessionReport() {
+    if (getSetting(SETTINGS.ENABLE_PLAYER_SHARING, true) === false) {
+      ui.notifications?.warn(localize("SCLS.Notification.ReportNotShared"));
+      return;
+    }
+    const ChatMessageClass = globalThis.ChatMessage;
+    const report = await this.sessionReportFor();
+    if (!report || typeof ChatMessageClass?.create !== "function") return;
+    await ChatMessageClass.create({ content: renderSessionHtml(report), speaker: ChatMessageClass.getSpeaker?.() ?? {}, whisper: [] });
+    countFeature(MODULE_ID, "sessionShared");
+    ui.notifications?.info(localize("SCLS.Notification.SessionPosted"));
+  }
+
+  static async #onCopySessionDiscord() {
+    const report = await this.sessionReportFor({ markNames: true });
+    if (!report) return;
+    const messages = sessionDiscordMessages(report);
+    countFeature(MODULE_ID, "sessionShared");
+    if (messages.length > 1) {
+      await showDiscordParts(messages);
+      return;
+    }
+    if (await copyText(messages[0] ?? "")) ui.notifications?.info(localize("SCLS.Notification.SessionCopied"));
   }
 
   static async #onSortDpr(_event, target) {
@@ -676,12 +760,13 @@ function warningLines(counts, systemId = "") {
 }
 
 function visibleTabs(hasLog, activeTab, tabIds = TABS) {
-  return tabIds.filter((id) => hasLog || id === "history").map((id) => ({ id, label: localize(`SCLS.Tab.${id}`), icon: tabIcon(id), active: id === activeTab }));
+  return tabIds.filter((id) => hasLog || OVERVIEW_TABS.includes(id)).map((id) => ({ id, label: localize(`SCLS.Tab.${id}`), icon: tabIcon(id), active: id === activeTab }));
 }
 
 function tabIcon(id) {
   switch (id) {
     case "history": return "fa-solid fa-clock-rotate-left";
+    case "sessions": return "fa-solid fa-calendar-days";
     case "summary": return "fa-solid fa-chart-pie";
     case "timeline": return "fa-solid fa-list-ol";
     case "statistics": return "fa-solid fa-chart-column";
@@ -697,8 +782,8 @@ function tabNavigation(hasLog, activeTab, tabIds = TABS) {
   const tabs = visibleTabs(hasLog, activeTab, tabIds);
   return {
     hasTabs: tabs.length > 0,
-    historyTab: tabs.find((tab) => tab.id === "history") ?? null,
-    detailTabs: hasLog ? tabs.filter((tab) => tab.id !== "history") : [],
+    overviewTabs: tabs.filter((tab) => OVERVIEW_TABS.includes(tab.id)),
+    detailTabs: hasLog ? tabs.filter((tab) => !OVERVIEW_TABS.includes(tab.id)) : [],
     showConnector: Boolean(hasLog),
     connectorLabel: localize("SCLS.Navigation.SelectedCombat"),
     connectorIcon: "fa-solid fa-angles-right"

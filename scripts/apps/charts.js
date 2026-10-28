@@ -14,6 +14,31 @@ const MAX_COMBATANTS = 12;
 // enemies false: party columns only (player view of a combat without enemy numbers).
 export function roundDamageChart(rows = [], { formatValue = String, enemies = true } = {}) {
   const data = (rows ?? []).filter((row) => Number(row?.round) > 0);
+  const key = enemies ? "SCLS.Chart.RoundSummary" : "SCLS.Chart.RoundSummaryParty";
+  return sideColumnChart(data, {
+    formatValue,
+    enemies,
+    axis: (row) => formatValue(row.round),
+    tooltip: (row, side, amount) => format("SCLS.Chart.RoundTooltip", { round: formatValue(row.round), side, amount }),
+    label: (totals) => format(data.length === 1 ? `${key}One` : key, { count: formatValue(data.length), party: formatValue(totals[0]), enemies: formatValue(totals[1] ?? 0) })
+  });
+}
+
+// Party and enemy damage per fight of a session, or per session. rows: {label, name, partyDamage, enemyDamage};
+// label goes under the column, name into the tooltip. count: "3 fights", for the summary of the chart.
+export function groupDamageChart(rows = [], { formatValue = String, enemies = true, count = "" } = {}) {
+  const key = enemies ? "SCLS.Chart.GroupSummary" : "SCLS.Chart.GroupSummaryParty";
+  return sideColumnChart(rows ?? [], {
+    formatValue,
+    enemies,
+    axis: (row) => String(row.label ?? ""),
+    tooltip: (row, side, amount) => format("SCLS.Chart.GroupTooltip", { name: String(row.name ?? row.label ?? ""), side, amount }),
+    label: (totals) => format(key, { count, party: formatValue(totals[0]), enemies: formatValue(totals[1] ?? 0) })
+  });
+}
+
+// Grouped columns, party and enemies side by side.
+function sideColumnChart(data, { formatValue, enemies, axis, tooltip, label: summaryLabel }) {
   const values = data.flatMap((row) => enemies ? [positive(row.partyDamage), positive(row.enemyDamage)] : [positive(row.partyDamage)]);
   if (!data.length || !values.some(Boolean)) return "";
   const { height, top, bottom, left, right, bar, gap, minWidth } = ROUND_CHART;
@@ -31,16 +56,13 @@ export function roundDamageChart(rows = [], { formatValue = String, enemies = tr
     const start = left + (index * group) + ((group - (series.length * bar) - ((series.length - 1) * gap)) / 2);
     series.forEach((entry, position) => {
       const value = entry.value(row);
-      const tooltip = format("SCLS.Chart.RoundTooltip", { round: formatValue(row.round), side: entry.label, amount: formatValue(value) });
-      parts.push(barRect({ x: start + (position * (bar + gap)), y: y(value), width: bar, height: Math.max(0, top + plot - y(value)), tone: entry.key, tooltip }));
+      parts.push(barRect({ x: start + (position * (bar + gap)), y: y(value), width: bar, height: Math.max(0, top + plot - y(value)), tone: entry.key, tooltip: tooltip(row, entry.label, formatValue(value)) }));
     });
-    // Round numbers under every column; with many rounds every second one.
-    if (data.length <= 16 || index % 2 === 0) parts.push(`<text class="scls-chart__axis" x="${fixed(left + (index * group) + (group / 2))}" y="${height - 8}" text-anchor="middle">${escapeHtml(formatValue(row.round))}</text>`);
+    // Labels under every column; with many columns every second one.
+    if (data.length <= 16 || index % 2 === 0) parts.push(`<text class="scls-chart__axis" x="${fixed(left + (index * group) + (group / 2))}" y="${height - 8}" text-anchor="middle">${escapeHtml(axis(row))}</text>`);
   });
   const totals = series.map((entry) => data.reduce((total, row) => total + entry.value(row), 0));
-  const key = enemies ? "SCLS.Chart.RoundSummary" : "SCLS.Chart.RoundSummaryParty";
-  const label = format(data.length === 1 ? `${key}One` : key, { count: formatValue(data.length), party: formatValue(totals[0]), enemies: formatValue(totals[1] ?? 0) });
-  return svg({ width, height, label, body: parts.join("") });
+  return svg({ width, height, label: summaryLabel(totals), body: parts.join("") });
 }
 
 // Damage dealt, damage taken and healing per combatant as horizontal bars on one scale.

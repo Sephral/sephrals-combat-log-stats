@@ -11,7 +11,9 @@
   {{#if tabNavigation.hasTabs}}
   <nav class="scls-tabs">
     <div class="scls-tab-group scls-tab-group--history">
-      <button type="button" class="{{#if tabNavigation.historyTab.active}}is-active{{/if}}" data-action="switchTab" data-tab="{{tabNavigation.historyTab.id}}" title="{{tabNavigation.historyTab.label}}"><i class="{{tabNavigation.historyTab.icon}}" aria-hidden="true"></i><span>{{tabNavigation.historyTab.label}}</span></button>
+      {{#each tabNavigation.overviewTabs}}
+      <button type="button" class="{{#if this.active}}is-active{{/if}}" data-action="switchTab" data-tab="{{this.id}}" title="{{this.label}}"><i class="{{this.icon}}" aria-hidden="true"></i><span>{{this.label}}</span></button>
+      {{/each}}
     </div>
     {{#if tabNavigation.showConnector}}
     <div class="scls-tab-connector" aria-hidden="true">
@@ -58,6 +60,110 @@
       </table>
       {{else}}
       <p class="scls-muted">{{sclsLocalize "SCLS.Label.NoHistory"}}</p>
+      {{/if}}
+    </section>
+
+    <section class="scls-panel scls-sessions" data-panel="sessions">
+      <h3>{{sclsLocalize "SCLS.Tab.sessions"}}</h3>
+      {{#if sessions.hasFights}}
+      <div class="scls-session-bar">
+        <label class="scls-session-select">
+          <span>{{sclsLocalize "SCLS.Session.Select"}}</span>
+          <select data-scls-action="selectSession">
+            {{#each sessions.options}}<option value="{{this.value}}" {{#if this.selected}}selected{{/if}}>{{this.label}}</option>{{/each}}
+          </select>
+        </label>
+        {{#unless readOnly}}
+        <div class="scls-share-actions">
+          <button type="button" data-action="postSessionReport" title="{{sclsLocalize "SCLS.Session.Post"}}" {{#unless sessions.sharingEnabled}}disabled{{/unless}}><i class="fa-solid fa-message" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Session.Post"}}</span></button>
+          <button type="button" data-action="copySessionDiscord" title="{{sclsLocalize "SCLS.Button.CopyDiscord"}}"><i class="fa-brands fa-discord" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.CopyDiscord"}}</span></button>
+        </div>
+        {{/unless}}
+      </div>
+      <p class="scls-muted scls-session-range">{{sessions.rangeLabel}}</p>
+      <div class="scls-grid scls-grid--cards">
+        {{#each sessions.cards}}<div class="scls-metric{{#if this.tone}} scls-metric--{{this.tone}}{{/if}}"><span>{{this.label}}</span><strong>{{this.value}}</strong></div>{{/each}}
+      </div>
+      <div class="scls-session-layout">
+        <section class="scls-metrics-block">
+          <h4>{{#if sessions.enemyStats}}{{sclsLocalize "SCLS.Session.Versus"}}{{else}}{{sclsLocalize "SCLS.Chart.Party"}}{{/if}}</h4>
+          <table class="scls-table scls-versus-table">
+            <thead><tr><th></th><th class="scls-versus__party">{{sclsLocalize "SCLS.Chart.Party"}}</th>{{#if sessions.enemyStats}}<th></th><th class="scls-versus__enemies">{{sclsLocalize "SCLS.Chart.Enemies"}}</th>{{/if}}</tr></thead>
+            <tbody>
+              {{#each sessions.versus}}
+              <tr><th scope="row">{{this.label}}</th><td class="scls-versus__party">{{this.party}}</td>{{#if @root.sessions.enemyStats}}<td class="scls-versus__cell"><span class="scls-versus{{#if this.empty}} is-empty{{/if}}" style="--scls-share: {{this.share}}%" title="{{this.tooltip}}"><i></i></span></td><td class="scls-versus__enemies">{{this.enemies}}</td>{{/if}}</tr>
+              {{/each}}
+            </tbody>
+          </table>
+          {{#unless sessions.enemyStats}}<p class="scls-muted">{{sclsLocalize "SCLS.Session.EnemiesHidden"}}</p>{{/unless}}
+        </section>
+        {{#if sessions.chart}}
+        <figure class="scls-chart scls-metrics-block{{#if sessions.chartWide}} scls-session-chart--wide{{/if}}">
+          <figcaption><h4>{{sessions.chartTitle}}</h4>
+            <ul class="scls-chart__legend">{{#each sessions.chartLegend}}<li><i class="scls-chart__swatch scls-chart__swatch--{{this.tone}}" aria-hidden="true"></i>{{this.label}}</li>{{/each}}</ul>
+          </figcaption>
+          {{{sessions.chart}}}
+        </figure>
+        {{/if}}
+      </div>
+      <h4>{{sclsLocalize "SCLS.Session.Members"}}</h4>
+      {{#if sessions.members.length}}
+      <table class="scls-table">
+        <thead><tr><th>{{sclsLocalize "SCLS.Label.Name"}}</th><th>{{sclsLocalize "SCLS.Label.Fights"}}</th><th>{{sclsLocalize "SCLS.Label.DamageDealt"}}</th><th>{{sclsLocalize "SCLS.Label.NetDPR"}}</th><th>{{sclsLocalize "SCLS.Label.DamageTaken"}}</th><th>{{sclsLocalize "SCLS.Label.Healing"}}</th><th>{{sclsLocalize "SCLS.Label.Takedowns"}}</th><th>{{sclsLocalize "SCLS.Label.Downed"}}</th><th>{{sclsLocalize "SCLS.Label.CriticalHits"}}</th>{{#if sessions.showMorale}}<th>{{sclsLocalize "SCLS.Label.MoraleDamage"}}</th>{{/if}}</tr></thead>
+        <tbody>
+          {{#each sessions.members}}
+          <tr class="scls-side--friendly"><td><span class="scls-combatant-cell"><img class="scls-avatar--tiny" src="{{this.img}}" alt="">{{this.name}}</span></td><td>{{this.fights}}</td><td>{{this.damage}}</td><td>{{this.dpr}}</td><td>{{this.taken}}</td><td>{{this.healing}}</td><td>{{this.takedowns}}</td><td>{{this.downed}}</td><td>{{this.crits}}</td>{{#if @root.sessions.showMorale}}<td>{{this.morale}}</td>{{/if}}</tr>
+          {{/each}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="scls-muted">{{sclsLocalize "SCLS.Label.NoParticipants"}}</p>
+      {{/if}}
+      <h4>{{sclsLocalize "SCLS.Metrics.Awards"}}</h4>
+      {{#if sessions.awards.length}}
+      <ul class="scls-awards" aria-label="{{sclsLocalize "SCLS.Metrics.Awards"}}">
+        {{#each sessions.awards}}
+        <li class="scls-award scls-award--{{this.key}}">
+          <i class="{{this.icon}}" aria-hidden="true"></i>
+          <span class="scls-award__label">{{this.label}}</span>
+          <strong class="scls-award__names">{{this.names}}</strong>
+          <span class="scls-award__detail">{{this.detail}}</span>
+        </li>
+        {{/each}}
+      </ul>
+      {{else}}
+      <p class="scls-muted">{{sclsLocalize "SCLS.Award.Empty"}}</p>
+      {{/if}}
+      {{#if sessions.isAll}}
+      <h4>{{sclsLocalize "SCLS.Tab.sessions"}}</h4>
+      <table class="scls-table">
+        <thead><tr><th></th><th>{{sclsLocalize "SCLS.Session.Select"}}</th><th>{{sclsLocalize "SCLS.Label.Fights"}}</th><th>{{sclsLocalize "SCLS.Label.Rounds"}}</th><th>{{sclsLocalize "SCLS.Label.PartyNetDamage"}}</th>{{#if sessions.enemyStats}}<th>{{sclsLocalize "SCLS.Label.EnemyDamage"}}</th>{{/if}}<th>{{sclsLocalize "SCLS.Label.EnemiesDefeated"}}</th><th>{{sclsLocalize "SCLS.Label.PartyDowned"}}</th></tr></thead>
+        <tbody>
+          {{#each sessions.sessionRows}}
+          <tr>
+            <td class="scls-history-select-cell"><button type="button" data-action="selectSession" data-session-id="{{this.id}}" title="{{sclsLocalize "SCLS.Button.Open"}}"><i class="fa-solid fa-folder-open" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Open"}}</span></button></td>
+            <td><strong>{{this.label}}</strong></td><td>{{this.fights}}</td><td>{{this.rounds}}</td><td>{{this.partyDamage}}</td>{{#if @root.sessions.enemyStats}}<td>{{this.enemyDamage}}</td>{{/if}}<td>{{this.enemiesDefeated}}</td><td>{{this.partyDowned}}</td>
+          </tr>
+          {{/each}}
+        </tbody>
+      </table>
+      {{else}}
+      <h4>{{sclsLocalize "SCLS.Label.Fights"}}</h4>
+      <table class="scls-table">
+        <thead><tr><th></th><th>{{sclsLocalize "SCLS.Label.Combat"}}</th><th>{{sclsLocalize "SCLS.Label.Rounds"}}</th><th>{{sclsLocalize "SCLS.Label.PartyNetDamage"}}</th>{{#if sessions.enemyStats}}<th>{{sclsLocalize "SCLS.Label.EnemyDamage"}}</th>{{/if}}<th>{{sclsLocalize "SCLS.Label.EnemiesDefeated"}}</th><th>{{sclsLocalize "SCLS.Label.PartyDowned"}}</th></tr></thead>
+        <tbody>
+          {{#each sessions.fightRows}}
+          <tr>
+            <td class="scls-history-select-cell"><button type="button" data-action="openLog" data-log-id="{{this.id}}" title="{{sclsLocalize "SCLS.Button.Open"}}"><i class="fa-solid fa-folder-open" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Open"}}</span></button></td>
+            <td class="scls-history-combat-cell"><strong>{{this.title}}</strong><span>{{this.startedLabel}}{{#if this.active}} · {{this.statusLabel}}{{/if}}</span></td><td>{{this.rounds}}</td><td>{{this.partyDamage}}</td>{{#if @root.sessions.enemyStats}}<td>{{this.enemyDamage}}</td>{{/if}}<td>{{this.enemiesDefeated}}</td><td>{{this.partyDowned}}</td>
+          </tr>
+          {{/each}}
+        </tbody>
+      </table>
+      {{/if}}
+      <p class="scls-muted scls-session-hint">{{sclsLocalize "SCLS.Session.Hint"}}{{#unless readOnly}} {{sclsLocalize "SCLS.Session.ShareHint"}}{{/unless}}</p>
+      {{else}}
+      <p class="scls-muted">{{sclsLocalize "SCLS.Session.Empty"}}</p>
       {{/if}}
     </section>
 

@@ -471,7 +471,8 @@ function applyMoraleDelta(event, summary, source, target, amount) {
   }
 }
 
-function dprValue(bucket, method) {
+// The damage a combatant or side counts toward damage per round, by the chosen basis. Sessions add these up too.
+export function dprValue(bucket, method) {
   if (method === DPR_METHODS.ROLLED) return bucket.damageRolled;
   if (method === DPR_METHODS.APPLIED_GROSS) return bucket.damageAppliedGross;
   return bucket.damageAppliedNet;
