@@ -152,10 +152,17 @@ Excel with German regional settings expects semicolons in CSV files. Import the 
 | History retention days | world | Remove ended logs older than this, 0 keeps all |
 | Debug logging | you | Extra console output for troubleshooting |
 | Self test | GM | Checks the connection to Foundry and the game system and the stored combat logs |
+| Save debug file | GM | One file for bug reports about all of Sephral’s modules. See [Debug file](#debug-file) |
 
 *Follow Foundry* uses Foundry's language, including community translations. The gear in the title bar of the window opens these settings.
 
 Run the self test after every update of Foundry or the game system. When a newer version than the tested one is installed, the GM gets a notice once.
+
+## Debug file
+
+For bug reports, the GM saves one file about all of Sephral’s modules in this world: `Save debug file` in the module settings, or `Save Debug File (Sephral’s Modules)` in the context menu of a chat message. It holds the versions of Foundry, the system and the active modules, the settings of the modules and what they recorded, for Combat Log & Stats the running and stored logs in short and the log events a chat message led to. The detailed debug log of a fight stays in the Sharing tab of the combat log window (see [Export](#export)). Macros call `game.modules.get("sephrals-combat-log-stats").api.saveDebugFile()`.
+
+The file contains chat text and whispers. Check it before you share it.
 
 ## Usage statistics
 

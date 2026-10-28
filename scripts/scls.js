@@ -1,6 +1,8 @@
 import { EVENT_TYPES, HOOKS, MODULE_ID, SETTINGS } from "./constants.js";
 import { CombatLogApp } from "./apps/combat-log-app.js";
 import { CombatLogService } from "./services/combat-log-service.js";
+import { registerDebug } from "./debug.js";
+import { saveDebugFile } from "./debug-file.mjs";
 import { canViewCombatLogs } from "./services/player-view-service.js";
 import { getSetting, registerSettings } from "./settings.js";
 import { noticeNewVersions, runSelfTest } from "./selftest.js";
@@ -131,6 +133,7 @@ function applyPlayerAccessChange() {
 
 Hooks.once("init", () => {
   registerSettings();
+  registerDebug(() => combatLogService);
   registerUsage(MODULE_ID, {
     features: ["combatLogged", "logCorrected", "sharingSaved", "reportPosted", "journalReport", "discordCopied", "logExported", "selfTestRun"],
     settings: [SETTINGS.DEFAULT_SHARE_MODE, SETTINGS.DEFAULT_DPR_METHOD, SETTINGS.PLAYER_STATS_ACCESS]
@@ -173,6 +176,12 @@ Hooks.once("ready", async () => {
     combatLogService?.stashPendingSaves();
     void combatLogService?.flushPendingSaves();
   });
-  game.modules.get(MODULE_ID).api = { openCombatLog, service: combatLogService, runSelfTest: (options) => runSelfTest(combatLogService, options) };
+  game.modules.get(MODULE_ID).api = {
+    openCombatLog,
+    service: combatLogService,
+    runSelfTest: (options) => runSelfTest(combatLogService, options),
+    // One file for all of Sephral's modules, without a message id about their latest picture
+    saveDebugFile: (messageId) => saveDebugFile(messageId ?? null, { moduleId: MODULE_ID })
+  };
   noticeNewVersions();
 });

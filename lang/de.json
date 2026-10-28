@@ -457,8 +457,7 @@
   "SCLS.Crucible.Warning.ManualIncludedOne": "1 Änderung an Gesundheit oder Moral wurde von Hand korrigiert und zählt mit.",
   "SCLS.Crucible.Warning.ManualIncludedOther": "{count} Änderungen an Gesundheit oder Moral wurden von Hand korrigiert und zählen mit.",
   "SCLS.Crucible.Label.NoCorrections": "Nichts zu prüfen. Jede Änderung an Gesundheit und Moral ist zugeordnet.",
-  "SCLS.Crucible.Label.AutomaticCorrections": "Schaden, Heilung und Ziele stammen aus bestätigten Aktionskarten und Änderungen an Gesundheit und Moral. Dieser Tab zeigt nur Einträge, die noch geprüft werden sollten."
-,
+  "SCLS.Crucible.Label.AutomaticCorrections": "Schaden, Heilung und Ziele stammen aus bestätigten Aktionskarten und Änderungen an Gesundheit und Moral. Dieser Tab zeigt nur Einträge, die noch geprüft werden sollten.",
   "SCLS.SelfTest.Title": "Selbsttest von Combat Log & Stats",
   "SCLS.SelfTest.Run": "Selbsttest starten",
   "SCLS.SelfTest.Hint": "Prüft die Anbindung an Foundry und dein Spielsystem und die gespeicherten Kampfprotokolle. Nach jedem Update von Foundry oder dem System ausführen.",
@@ -474,5 +473,10 @@
   "SCLS.SelfTest.Dnd5eDamage": "Die Schadensfunktion von D&D 5e wurde nicht gefunden, daher lässt sich angewendeter Schaden nicht zuordnen.",
   "SCLS.SelfTest.Storage": "Die gespeicherten Kampfprotokolle ließen sich nicht lesen.",
   "SCLS.SelfTest.Tracker": "Der Knopf im Kampftracker fehlt.",
-  "SCLS.SelfTest.NoCharacter": "Kein Spielercharakter gefunden, daher wurden die Ressourcen nicht geprüft."
+  "SCLS.SelfTest.NoCharacter": "Kein Spielercharakter gefunden, daher wurden die Ressourcen nicht geprüft.",
+  "SCLS.Debug.Title": "Debug-Datei",
+  "SCLS.Debug.Save": "Debug-Datei speichern",
+  "SCLS.Debug.Hint": "Speichert eine Datei für Fehlerberichte über alle Module von Sephral in dieser Welt: Versionen, Einstellungen und was die Module aufgezeichnet haben, etwa die letzten Chatnachrichten, die sie gelesen haben. Sie enthält Chattext und Flüsternachrichten, prüfe sie vor dem Teilen.",
+  "SCLS.Debug.Entry": "Debug-Datei speichern (Sephral’s Module)",
+  "SCLS.Debug.Saved": "Debug-Datei {file} gespeichert. Sie enthält Chattext und Flüsternachrichten, prüfe sie vor dem Teilen."
 }

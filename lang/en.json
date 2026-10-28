@@ -457,8 +457,7 @@
   "SCLS.Crucible.Warning.ManualIncludedOne": "1 change to health or morale was corrected by hand and counts in the numbers.",
   "SCLS.Crucible.Warning.ManualIncludedOther": "{count} changes to health or morale were corrected by hand and count in the numbers.",
   "SCLS.Crucible.Label.NoCorrections": "Nothing to check. Every change to health and morale is assigned.",
-  "SCLS.Crucible.Label.AutomaticCorrections": "Damage, healing and targets come from confirmed action cards and changes to health and morale. This tab only lists entries that still need a look."
-,
+  "SCLS.Crucible.Label.AutomaticCorrections": "Damage, healing and targets come from confirmed action cards and changes to health and morale. This tab only lists entries that still need a look.",
   "SCLS.SelfTest.Title": "Combat Log & Stats self test",
   "SCLS.SelfTest.Run": "Run self test",
   "SCLS.SelfTest.Hint": "Checks the connection to Foundry and your game system and the stored combat logs. Run it after an update of Foundry or the system.",
@@ -474,5 +473,10 @@
   "SCLS.SelfTest.Dnd5eDamage": "The damage function of D&D 5e was not found, so applied damage cannot be credited.",
   "SCLS.SelfTest.Storage": "The stored combat logs could not be read.",
   "SCLS.SelfTest.Tracker": "The button in the combat tracker is missing.",
-  "SCLS.SelfTest.NoCharacter": "No player character was found, so the resources were not checked."
+  "SCLS.SelfTest.NoCharacter": "No player character was found, so the resources were not checked.",
+  "SCLS.Debug.Title": "Debug file",
+  "SCLS.Debug.Save": "Save debug file",
+  "SCLS.Debug.Hint": "Saves one file for bug reports about all of Sephral’s modules in this world: versions, settings and what the modules recorded, such as the latest chat messages they read. It contains chat text and whispers, check it before you share it.",
+  "SCLS.Debug.Entry": "Save Debug File (Sephral’s Modules)",
+  "SCLS.Debug.Saved": "Debug file {file} saved. It contains chat text and whispers, check it before you share it."
 }
