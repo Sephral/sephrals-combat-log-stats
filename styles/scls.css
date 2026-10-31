@@ -982,6 +982,15 @@ p.scls-share-status.is-shared {
   background: var(--scls-panel-strong);
 }
 
+/* The credit line the Discord copy ends with, shown small under the preview. */
+.scls-report-preview .scls-report-preview__credit {
+  margin: 0.6rem 0 0;
+  padding-top: 0.35rem;
+  border-top: 1px dashed color-mix(in srgb, currentColor 25%, transparent);
+  font-size: var(--font-size-11, 0.7rem);
+  opacity: 0.75;
+}
+
 .scls-discord-parts {
   display: grid;
   gap: 0.65rem;

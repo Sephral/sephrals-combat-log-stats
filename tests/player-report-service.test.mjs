@@ -22,7 +22,7 @@ globalThis.game = {
   settings: { get: () => undefined }
 };
 
-const { PlayerReportService, reportSectionsWithContent, shareOptionAvailability, __test__ } = await import("../scripts/services/player-report-service.js");
+const { PlayerReportService, discordCredit, discordCreditPreviewHtml, discordReportMessages, reportSectionsWithContent, shareOptionAvailability, __test__ } = await import("../scripts/services/player-report-service.js");
 
 const ALL_SECTIONS = Object.freeze({
   combatRecap: true,
@@ -538,7 +538,45 @@ test("a long player report becomes several Discord messages that keep every line
   assert.ok(single.length > 2000);
   assert.ok(messages.length > 1);
   for (const message of messages) assert.ok(message.length <= 2000);
-  assert.equal(messages.join("\n\n").split("\n").filter(Boolean).length, single.split("\n").filter(Boolean).length);
+  // Every line of the report, and the credit line at the very end.
+  const lines = messages.join("\n\n").split("\n").filter(Boolean);
+  assert.equal(lines.at(-1), discordCredit());
+  assert.equal(lines.length - 1, single.split("\n").filter(Boolean).length);
+});
+
+test("the Discord copy ends with one quiet credit line that the GM can switch off, chat and journal never get it", () => {
+  const credit = "-# [Combat Log & Stats for Foundry VTT](<https://foundryvtt.com/packages/sephrals-combat-log-stats>)";
+  const service = new PlayerReportService();
+  const short = reportLog({ reportSections: { ...Object.fromEntries(Object.keys(ALL_SECTIONS).map((key) => [key, false])), combatRecap: true } });
+  const [message, ...rest] = service.discordMessages(short);
+
+  assert.equal(discordCredit(), credit);
+  assert.equal(rest.length, 0);
+  assert.ok(message.endsWith(`\n\n${credit}`), message);
+  assert.equal(message.split("\n").filter((line) => line.startsWith("-# ")).length, 1);
+  assert.doesNotMatch(service.renderHtml(service.buildReport(short)), /foundryvtt\.com|Foundry VTT/);
+  assert.doesNotMatch(service.renderMarkdown(service.buildReport(short)), /foundryvtt\.com|Foundry VTT/);
+  // The preview shows it below the report, marked for Discord.
+  assert.match(discordCreditPreviewHtml(), /^<p class="scls-report-preview__credit"><i class="fa-brands fa-discord" aria-hidden="true"><\/i> <span>Last line on Discord:<\/span> <a href="https:\/\/foundryvtt\.com\/packages\/sephrals-combat-log-stats" target="_blank" rel="noopener">Combat Log &amp; Stats for Foundry VTT<\/a><\/p>$/);
+
+  // It never costs an extra message: a report that just fills its last message goes without it.
+  const full = "x".repeat(1990);
+  assert.deepEqual(discordReportMessages(full), [full]);
+  const parts = discordReportMessages(["## T", "a".repeat(1900), "b".repeat(500)].join("\n\n"));
+  assert.equal(parts.length, 2);
+  assert.ok(parts.every((part) => part.length <= 2000));
+  assert.equal(parts[1], `${"b".repeat(500)}\n\n${credit}`);
+  assert.deepEqual(discordReportMessages(""), []);
+
+  const previous = game.settings.get;
+  game.settings.get = (_module, key) => (key === "discordCredit" ? false : undefined);
+  try {
+    assert.equal(discordCredit(), "");
+    assert.equal(discordCreditPreviewHtml(), "");
+    assert.doesNotMatch(service.discordMessages(short).join("\n"), /foundryvtt\.com/);
+  } finally {
+    game.settings.get = previous;
+  }
 });
 
 test("the awards section names party members only, with the share toggle and in the Discord copy", () => {

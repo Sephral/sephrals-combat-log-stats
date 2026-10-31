@@ -1,9 +1,11 @@
-import { EVENT_TYPES, HOOKS, MODULE_ID, SETTINGS } from "./constants.js";
+import { EVENT_TYPES, HOOKS, MODULE_ID, SETTINGS, TESTED_VERSIONS } from "./constants.js";
 import { CombatLogApp } from "./apps/combat-log-app.js";
 import { CombatLogService } from "./services/combat-log-service.js";
 import { registerDebug } from "./debug.js";
 import { saveDebugFile } from "./debug-file.mjs";
+import { registerHubModule } from "./hub.mjs";
 import { canViewCombatLogs } from "./services/player-view-service.js";
+import { sessionTotals } from "./services/session-service.js";
 import { getSetting, registerSettings } from "./settings.js";
 import { noticeNewVersions, runSelfTest } from "./selftest.js";
 import { isGM, isTrackingGM, loadModuleTranslations, localize, registerTemplateHelpers } from "./utils.js";
@@ -132,6 +134,7 @@ function applyPlayerAccessChange() {
 }
 
 Hooks.once("init", () => {
+  registerHubModule({ moduleId: MODULE_ID, tested: TESTED_VERSIONS });
   registerSettings();
   registerDebug(() => combatLogService);
   registerUsage(MODULE_ID, {
@@ -180,6 +183,8 @@ Hooks.once("ready", async () => {
     openCombatLog,
     service: combatLogService,
     runSelfTest: (options) => runSelfTest(combatLogService, options),
+    // Combat totals of the game sessions in a time span, as players may see them (other modules, e.g. Campaign Album)
+    sessionTotals: (spans) => sessionTotals(combatLogService, spans),
     // One file for all of Sephral's modules, without a message id about their latest picture
     saveDebugFile: (messageId) => saveDebugFile(messageId ?? null, { moduleId: MODULE_ID })
   };

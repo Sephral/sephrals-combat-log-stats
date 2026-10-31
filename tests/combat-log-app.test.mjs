@@ -289,6 +289,17 @@ test("the sharing preview renders the player report for the unsaved form setting
 
     const summary = __test__.reportPreviewHtml(service, sharingLog(), sharingForm({ mode: "summaryOnly" }));
     assert.doesNotMatch(summary, /Blades and Bows/);
+
+    // The credit line of the Discord copy shows below the report while the setting is on (here: off).
+    assert.doesNotMatch(anonymous, /scls-report-preview__credit/);
+    const settingsGet = game.settings.get;
+    game.settings.get = (moduleId, key) => (key === "discordCredit" ? true : settingsGet(moduleId, key));
+    try {
+      const credited = __test__.reportPreviewHtml(service, sharingLog(), sharingForm());
+      assert.match(credited, /<\/div><p class="scls-report-preview__credit">.*<span>Last line on Discord:<\/span> <a href="https:\/\/foundryvtt\.com\/packages\/sephrals-combat-log-stats" target="_blank" rel="noopener">Combat Log &amp; Stats for Foundry VTT<\/a><\/p>$/);
+    } finally {
+      game.settings.get = settingsGet;
+    }
   });
 });
 

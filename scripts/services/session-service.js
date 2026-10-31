@@ -1,7 +1,9 @@
-import { EVENT_TYPES, SIDES } from "../constants.js";
-import { escapeHtml, format, formatDateRange, formatDuration, localize } from "../utils.js";
-import { awardLine, awardTallies, computeAwards } from "./awards-service.js";
-import { discordText, formatNumber, markedName, splitDiscordMessage } from "./player-report-service.js";
+import { EVENT_TYPES, SETTINGS, SIDES } from "../constants.js";
+import { getSetting } from "../settings.js";
+import { escapeHtml, format, formatDateRange, formatDuration, isGM, localize } from "../utils.js";
+import { awardDetail, awardLabel, awardLine, awardTallies, computeAwards } from "./awards-service.js";
+import { discordReportMessages, discordText, formatNumber, markedName } from "./player-report-service.js";
+import { playerViewLog } from "./player-view-service.js";
 import { CombatStatsService, dprValue } from "./stats-service.js";
 import { isCrucibleLog, termKey } from "./system-terms.js";
 
@@ -224,11 +226,118 @@ export function renderSessionHtml(report) {
   return `<div class="scls-report scls-report--session">\n<h3 class="scls-report__title">${escapeHtml(report.title)}</h3>\n${body}\n</div>`;
 }
 
-// Discord messages of at most 2,000 characters each, formatted like the player report.
+// Discord messages of at most 2,000 characters each, formatted like the player report, with its credit line.
 export function sessionDiscordMessages(report) {
   const blocks = [`## ${discordText(report.title)}`];
   for (const section of report.sections) blocks.push([`**${discordText(section.label)}**`, ...section.entries.map((entry) => `- ${discordText(entry)}`)].join("\n"));
-  return splitDiscordMessage(blocks.join("\n\n"));
+  return discordReportMessages(blocks.join("\n\n"));
+}
+
+/**
+ * The sessions of a time span: every session that overlaps it, oldest first. When none does, the nearest session less
+ * than gapMs before or after it, so a photo taken just before the first fight of an evening still finds that evening.
+ * Without from: the latest session.
+ * @param {{id: string, startedAt: string, endedAt: string}[]} sessions  As groupSessions returns them
+ * @param {{from?: Date|number|string, to?: Date|number|string}} span
+ */
+export function sessionsInSpan(sessions = [], { from = null, to = null } = {}, { gapMs = SESSION_GAP_MS } = {}) {
+  if (!sessions.length) return [];
+  const start = timeOf(from);
+  if (start === null) return [sessions[0]];
+  const end = timeOf(to) ?? start;
+  const [low, high] = start <= end ? [start, end] : [end, start];
+  const bounds = (session) => [timeOf(session.startedAt) ?? 0, timeOf(session.endedAt) ?? timeOf(session.startedAt) ?? 0];
+  const overlapping = sessions.filter((session) => {
+    const [first, last] = bounds(session);
+    return first <= high && last >= low;
+  });
+  if (overlapping.length) return overlapping.reverse();
+  const distance = (session) => {
+    const [first, last] = bounds(session);
+    return first > high ? first - high : low - last;
+  };
+  const nearest = sessions.map((session) => ({ session, distance: distance(session) }))
+    .filter((entry) => entry.distance <= gapMs)
+    .sort((left, right) => left.distance - right.distance)[0];
+  return nearest ? [nearest.session] : [];
+}
+
+/**
+ * The totals of a summary for other modules (API sessionTotals): plain numbers and the names players may see, the
+ * party's numbers where a summary also knows the enemies'. enemyDamage is null unless every fight shares it.
+ */
+export function publicSessionTotals(summary, sessions = []) {
+  const starts = sessions.map((session) => timeOf(session.startedAt)).filter((time) => time !== null);
+  const ends = sessions.map((session) => timeOf(session.endedAt)).filter((time) => time !== null);
+  const { party, enemies } = summary;
+  return {
+    sessionIds: sessions.map((session) => session.id),
+    startedAt: starts.length ? new Date(Math.min(...starts)).toISOString() : null,
+    endedAt: ends.length ? new Date(Math.max(...ends)).toISOString() : null,
+    systemId: summary.systemId,
+    fights: summary.fights,
+    rounds: summary.rounds,
+    durationMs: summary.durationMs,
+    damage: party.damageDealt,
+    healing: party.healing,
+    moraleDamage: party.moraleDamage,
+    enemyDamage: summary.enemyStats ? enemies.damageDealt : null,
+    enemiesDefeated: summary.enemiesDefeated,
+    partyDowned: summary.partyDowned,
+    criticalHits: party.crits,
+    members: summary.members.map((member) => ({
+      name: member.name,
+      img: member.img,
+      fights: member.fights,
+      damage: member.damageAppliedNet,
+      healing: member.healingNet,
+      moraleDamage: member.moraleDamageDealt,
+      takedowns: member.takedowns,
+      downed: member.downed,
+      criticalHits: member.crits
+    })),
+    awards: summary.awards.map((award) => ({
+      key: award.key,
+      label: awardLabel(award.key),
+      names: award.winners.map((winner) => winner.name),
+      value: award.value,
+      detail: awardDetail(award)
+    }))
+  };
+}
+
+/**
+ * API sessionTotals: the combat totals of the game sessions in a time span, as players may see them. Each fight counts
+ * with its own sharing choices, like the session report for chat. null without a session in the span and while
+ * player reports are off. spans: one span or a list of them (one answer each, the fights are read once).
+ * @param {object} service   The CombatLogService
+ * @param {{from?: *, to?: *}|{from?: *, to?: *}[]} spans
+ */
+export async function sessionTotals(service, spans = {}) {
+  const list = Array.isArray(spans) ? spans : [spans ?? {}];
+  const none = () => (Array.isArray(spans) ? list.map(() => null) : null);
+  if (!service?.persistence || getSetting(SETTINGS.ENABLE_PLAYER_SHARING, true) === false) return none();
+  if (isGM()) await service.flushPendingSaves?.();
+  const live = new Map((service.listActiveLogs?.() ?? []).map((log) => [log.id, log]));
+  const logs = [];
+  for (const entry of await service.persistence.loadHistoryEntries()) {
+    if (!entry.loaded) continue;
+    const log = live.get(entry.combatLogId) ?? await service.persistence.loadLog(entry.combatLogId);
+    if (log) logs.push(log);
+  }
+  const sessions = groupSessions(logs);
+  const options = { statsOptions: service.statsOptions?.() ?? {} };
+  const views = new Map();
+  const viewOf = (log) => {
+    if (!views.has(log.id)) views.set(log.id, playerViewLog(log, options));
+    return views.get(log.id);
+  };
+  const answers = list.map((span) => {
+    const matched = sessionsInSpan(sessions, span ?? {});
+    if (!matched.length) return null;
+    return publicSessionTotals(summarizeFights(matched.flatMap((session) => session.logs).map(viewOf), options), matched);
+  });
+  return Array.isArray(spans) ? answers : answers[0];
 }
 
 // "Session of Sat, Oct 24, 2026", or the title for all sessions.

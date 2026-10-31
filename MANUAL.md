@@ -86,7 +86,7 @@ The Sessions tab adds up the fights of one game session, or of all sessions at o
 * **Awards:** the awards of the fights, for the whole session.
 * **Fights:** every fight of the session with its numbers. *Select* opens it. With *All sessions* the list shows the sessions instead.
 
-*Post to Chat* and *Copy for Discord* share the session as a short recap. Both use only what players may see of each fight, with the sharing choices of that fight, and posting needs *Allow player reports*.
+*Post to Chat* and *Copy for Discord* share the session as a short recap. Both use only what players may see of each fight, with the sharing choices of that fight, and posting needs *Allow player reports*. The Discord copy ends with the same small credit line as the player report (see [Sharing](#sharing)).
 
 ## Corrections
 
@@ -105,6 +105,8 @@ The Sharing tab offers only the report sections that have something to tell for 
 The preview in the Sharing tab shows the report as players will see it. It follows your choices right away, even before you save them.
 
 *Copy for Discord* copies the same report as Discord text with names in bold. Discord allows 2,000 characters per message, so a longer report is split into parts, each with its own copy button. Copying does not share the combat in Foundry.
+
+The Discord text ends with one small grey line, *Combat Log & Stats for Foundry VTT*, linked to the module's page on foundryvtt.com. The preview shows it below the report, chat and journal reports never get it. It never needs a message of its own: when the last part is full, the line is left out. *Credit line on Discord* in the settings turns it off.
 
 With *Post player report when combat ends* or *Create journal report when combat ends* turned on, every ended combat is shared automatically with its own sharing choices or the defaults from the module settings.
 
@@ -163,6 +165,7 @@ Excel with German regional settings expects semicolons in CSV files. Import the 
 | Hide enemy names by default | world | Reports call enemies Enemy 1, Enemy 2 and so on |
 | Post player report when combat ends | world | Post the report to chat automatically |
 | Create journal report when combat ends | world | Create the journal report automatically |
+| Credit line on Discord | world | Reports copied for Discord end with a small line that links to this module, on by default |
 | History retention days | world | Remove ended logs older than this, 0 keeps all |
 | Debug logging | you | Extra console output for troubleshooting |
 | Self test | GM | Checks the connection to Foundry and the game system and the stored combat logs |
@@ -177,6 +180,10 @@ Run the self test after every update of Foundry or the game system. When a newer
 For bug reports, the GM saves one file about all of Sephral’s modules in this world: `Save debug file` in the module settings, or `Save Debug File (Sephral’s Modules)` in the context menu of a chat message. It holds the versions of Foundry, the system and the active modules, the settings of the modules and what they recorded, for Combat Log & Stats the running and stored logs in short and the log events a chat message led to. The detailed debug log of a fight stays in the Sharing tab of the combat log window (see [Export](#export)). Macros call `game.modules.get("sephrals-combat-log-stats").api.saveDebugFile()`.
 
 The file contains chat text and whispers. Check it before you share it.
+
+## Sephral’s Modules
+
+The first button in the module settings, *Sephral’s Modules* (GMs only), opens one window for all of Sephral's modules in the world: the version, self test, settings, manual and demo video of each, a button that switches on an installed module that is off (Foundry then reloads the world for everyone), and the debug file. Below, *More from Sephral* lists other modules that fit the game system of the world, shown only after a click, each with its demo video. The list is part of the module. Only a video you start is loaded, from the module page on GitHub.
 
 ## Usage statistics
 
@@ -198,6 +205,23 @@ Combat logs are saved inside your world. They are never written into actors, ite
 Foundry has no storage that only the GM can read. A player who knows where to look could open the stored logs, so whispers and chat text are kept out of them.
 
 On The Forge with Foundry v14 the logs go to your Assets Library, in the folder `sephrals-combat-log-stats`. Logs from earlier versions move there automatically.
+
+## API
+
+Once the world is ready, `game.modules.get("sephrals-combat-log-stats").api` offers:
+
+| Function | What it does |
+| --- | --- |
+| `openCombatLog(logId)` | Opens the window, optionally at one fight |
+| `sessionTotals({from, to})` | The combat totals of the game sessions in a time span, as players may see them (see below) |
+| `runSelfTest()` | Runs the self test (GM) |
+| `saveDebugFile(messageId)` | Saves the debug file, about one chat message or without an id about the latest ones (GM) |
+
+`sessionTotals` counts every game session that overlaps the span from `from` to `to` (each a date, an ISO string or milliseconds, `to` may be left out). When no session overlaps it, the nearest session less than 6 hours away counts, and without `from` the latest session. Each fight counts with its own sharing choices, exactly like *Post to Chat* in the Sessions tab, so the numbers are safe to show players. It returns `null` when there is no such session and while *Allow player reports* is off. A list of spans gets a list of answers, and the fights are read only once. Sephral’s Campaign Album uses it for the combat totals on its session pages.
+
+An answer holds `fights`, `rounds`, `durationMs`, the party's `damage`, `healing` and `moraleDamage` (Crucible), `enemyDamage` (`null` unless every fight shares enemy numbers), `enemiesDefeated`, `partyDowned`, the party's `criticalHits`, the `members` of the party (name, portrait, fights, damage, healing, morale damage, takedowns, times downed and critical hits), the `awards` (key, label, names, value and detail) and `startedAt`, `endedAt` and `sessionIds`.
+
+The hook `sephrals-combat-log-stats.logUpdated` runs on the recording GM's client whenever a log is saved, with the log, and with `{id, deleted: true}` when a log is deleted.
 
 ## Limitations
 

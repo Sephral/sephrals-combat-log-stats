@@ -15,7 +15,7 @@ globalThis.game = {
 globalThis.Hooks = { on: () => {}, off: () => {} };
 globalThis.foundry = { applications: { api: { ApplicationV2: class { async close() {} } } } };
 
-const { ALL_SESSIONS, SESSION_GAP_MS, fightSpan, groupSessions, memberKey, sessionDiscordMessages, sessionReport, renderSessionHtml, sessionRows, summarizeFights } = await import("../scripts/services/session-service.js");
+const { ALL_SESSIONS, SESSION_GAP_MS, fightSpan, groupSessions, memberKey, sessionDiscordMessages, sessionReport, renderSessionHtml, sessionRows, sessionTotals, sessionsInSpan, summarizeFights } = await import("../scripts/services/session-service.js");
 const { sessionPanel } = await import("../scripts/apps/session-panel.js");
 const { playerViewLog } = await import("../scripts/services/player-view-service.js");
 const { CombatLogApp } = await import("../scripts/apps/combat-log-app.js");
@@ -244,6 +244,91 @@ test("the session report reads like the player report and bolds names for Discor
   const overAll = sessionReport(summary, { title: "All", sessions: sessionRows(summary, sessions) });
   assert.equal(overAll.sections.at(-1).label, english["SCLS.Tab.sessions"]);
   assert.equal(overAll.sections.at(-1).entries.length, 1);
+});
+
+test("the session Discord copy ends with the credit line, the chat card does not", () => {
+  const summary = summarizeFights([fight("a", "2026-10-24T19:00:00.000Z", { hits: [["aria", "goblin", 12]] })]);
+  const report = sessionReport(summary, { title: "Session of Saturday", markNames: true });
+  const [discord] = sessionDiscordMessages(report);
+
+  assert.ok(discord.endsWith("\n\n-# [Combat Log & Stats for Foundry VTT](<https://foundryvtt.com/packages/sephrals-combat-log-stats>)"), discord);
+  assert.doesNotMatch(renderSessionHtml(report), /foundryvtt\.com/);
+  settings.set("sephrals-combat-log-stats.discordCredit", false);
+  try {
+    assert.doesNotMatch(sessionDiscordMessages(report).join("\n"), /foundryvtt\.com/);
+  } finally {
+    settings.delete("sephrals-combat-log-stats.discordCredit");
+  }
+});
+
+test("a time span finds the sessions it overlaps, else the nearest one less than six hours away", () => {
+  const sessions = groupSessions([
+    fight("a", "2026-10-24T19:00:00.000Z"),
+    fight("b", "2026-10-24T21:00:00.000Z"),
+    fight("d", "2026-10-31T19:00:00.000Z")
+  ]);
+  const ids = (span) => sessionsInSpan(sessions, span).map((session) => session.id);
+
+  assert.deepEqual(ids({ from: "2026-10-24T19:10:00.000Z", to: "2026-10-24T23:00:00.000Z" }), ["session-a"]);
+  assert.deepEqual(ids({ from: Date.parse("2026-10-24T20:00:00.000Z") }), ["session-a"], "a single time, as ms");
+  assert.deepEqual(ids({ from: new Date("2026-10-24T17:30:00.000Z"), to: new Date("2026-10-24T18:00:00.000Z") }), ["session-a"], "a photo before the first fight");
+  assert.deepEqual(ids({ from: "2026-10-25T02:00:00.000Z" }), ["session-a"], "a photo after the last fight");
+  assert.deepEqual(ids({ from: "2026-10-27T12:00:00.000Z" }), [], "nothing on a day in between");
+  assert.deepEqual(ids({ from: "2026-10-24T18:00:00.000Z", to: "2026-10-31T20:00:00.000Z" }), ["session-a", "session-d"], "oldest first");
+  assert.deepEqual(ids({ to: "2026-10-31T20:00:00.000Z", from: "2026-10-24T18:00:00.000Z" }), ["session-a", "session-d"]);
+  assert.deepEqual(ids({}), ["session-d"], "without a time the latest session");
+  assert.deepEqual(sessionsInSpan([], { from: "2026-10-24T19:00:00.000Z" }), []);
+});
+
+test("the API totals of a game night are what players may see, read once for several spans", async () => {
+  const stored = new Map([
+    ["a", fight("a", "2026-10-24T19:00:00.000Z", { hits: [["aria", "goblin", 12, true], ["goblin", "bram", 5]] })],
+    ["b", fight("b", "2026-10-24T20:00:00.000Z", { hits: [["bram", "goblin", 6]], hidden: true })],
+    ["d", fight("d", "2026-10-31T19:00:00.000Z", { hits: [["bram", "goblin", 3]] })]
+  ]);
+  // The running fight d is newer in memory than in the store.
+  const live = fight("d", "2026-10-31T19:00:00.000Z", { hits: [["bram", "goblin", 3], ["aria", "goblin", 4]] });
+  let flushed = 0;
+  let reads = 0;
+  const service = {
+    statsOptions: () => ({}),
+    listActiveLogs: () => [live],
+    flushPendingSaves: async () => { flushed += 1; },
+    persistence: {
+      loadLog: async (id) => { reads += 1; return structuredClone(stored.get(id) ?? null); },
+      loadHistoryEntries: async () => [...stored.keys(), "gone"].map((id) => ({ combatLogId: id, status: "ended", loaded: id !== "gone" }))
+    }
+  };
+
+  const night = await sessionTotals(service, { from: "2026-10-24T19:30:00.000Z", to: "2026-10-24T22:00:00.000Z" });
+  assert.equal(flushed, 1, "the GM writes pending saves first");
+  assert.deepEqual(night.sessionIds, ["session-a"]);
+  assert.equal(night.startedAt, "2026-10-24T19:00:00.000Z");
+  assert.equal(night.fights, 2);
+  assert.equal(night.rounds, 4);
+  assert.equal(night.damage, 12, "the party's damage, without the hits on the hidden enemy");
+  assert.equal(night.enemyDamage, null, "the fights keep their enemy numbers back");
+  assert.equal(night.enemiesDefeated, 1);
+  assert.deepEqual(night.members.map((member) => [member.name, member.fights, member.damage]), [["Aria", 2, 12], ["Bram", 2, 0]]);
+  assert.deepEqual(night.awards.find((award) => award.key === "mvp"), { key: "mvp", label: "MVP", names: ["Aria"], value: 12, detail: "12 damage and healing" });
+  assert.equal(JSON.stringify(night).includes("Goblin Boss"), false, "no enemy name");
+
+  reads = 0;
+  const [first, latest, empty] = await sessionTotals(service, [{ from: "2026-10-24T19:30:00.000Z" }, { from: "2026-10-31T19:05:00.000Z" }, { from: "2026-10-28T12:00:00.000Z" }]);
+  assert.equal(reads, 2, "the stored fights are read once for all spans, the running one comes from memory");
+  assert.equal(first.fights, 2);
+  assert.equal(latest.damage, 7, "the running fight as recorded right now");
+  assert.equal(empty, null);
+  assert.equal((await sessionTotals(service)).sessionIds[0], "session-d", "without a span the latest session");
+
+  settings.set("sephrals-combat-log-stats.enablePlayerSharing", false);
+  try {
+    assert.equal(await sessionTotals(service, { from: "2026-10-24T19:30:00.000Z" }), null, "nothing while player reports are off");
+    assert.deepEqual(await sessionTotals(service, [{ from: "2026-10-24T19:30:00.000Z" }]), [null]);
+  } finally {
+    settings.delete("sephrals-combat-log-stats.enablePlayerSharing");
+  }
+  assert.equal(await sessionTotals(null, {}), null);
 });
 
 test("Crucible sessions speak of health and show morale damage", () => {

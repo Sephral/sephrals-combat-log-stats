@@ -3,7 +3,7 @@ import { getSetting } from "../settings.js";
 import { addSettingsGear, downloadData, escapeHtml, format, formatDateTime, formatDuration, isTrackingGM, localize, renderAppTemplate } from "../utils.js";
 import { CombatLogExportService } from "../services/export-service.js";
 import { canWriteCombatLogs, effectiveShareMode, playerHistoryEntry, playerShareSettings, playerTabs, playerViewLog, SHAREABLE_MODES } from "../services/player-view-service.js";
-import { formatNumber, normalizeReportSections, PlayerReportService, REPORT_SECTIONS, reportSectionsWithContent, shareOptionAvailability } from "../services/player-report-service.js";
+import { discordCreditPreviewHtml, formatNumber, normalizeReportSections, PlayerReportService, REPORT_SECTIONS, reportSectionsWithContent, shareOptionAvailability } from "../services/player-report-service.js";
 import { awardDetail, awardLabel, computeAwards } from "../services/awards-service.js";
 import { ALL_SESSIONS, groupSessions, renderSessionHtml, sessionDiscordMessages, sessionReport, sessionRows, sessionTitle, summarizeFights } from "../services/session-service.js";
 import { CombatStatsService } from "../services/stats-service.js";
@@ -674,8 +674,9 @@ function showReportSections(form, available) {
   if (fieldset) fieldset.hidden = !labels.some((label) => !label.hidden);
 }
 
+// The report as players get it, and below it the credit line the Discord copy ends with.
 function reportPreviewHtml(playerReports, log, formData) {
-  return playerReports.renderHtml(playerReports.buildReport(log, { shareSettings: reportSettingsFromForm(log, formData) }));
+  return playerReports.renderHtml(playerReports.buildReport(log, { shareSettings: reportSettingsFromForm(log, formData) })) + discordCreditPreviewHtml();
 }
 
 async function confirmDeleteCombatLog(title = "") {

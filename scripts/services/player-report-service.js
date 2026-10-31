@@ -1,4 +1,4 @@
-import { CONFIDENCE, EVENT_TYPES, SETTINGS, SHARE_MODES, SIDES, SOURCE_KINDS, VISIBILITY } from "../constants.js";
+import { CONFIDENCE, EVENT_TYPES, PACKAGE_URL, SETTINGS, SHARE_MODES, SIDES, SOURCE_KINDS, VISIBILITY } from "../constants.js";
 import { getSetting } from "../settings.js";
 import { activeLocale, escapeHtml, format, isoNow, localize } from "../utils.js";
 import { awardLine, computeAwards } from "./awards-service.js";
@@ -146,9 +146,9 @@ export class PlayerReportService {
     return blocks.join("\n\n");
   }
 
-  // The player report as Discord messages of at most 2,000 characters each.
+  // The player report as Discord messages of at most 2,000 characters each, the credit line at the end.
   discordMessages(log, options = {}) {
-    return splitDiscordMessage(this.renderDiscordMarkdown(this.buildReport(log, { ...options, markNames: true })));
+    return discordReportMessages(this.renderDiscordMarkdown(this.buildReport(log, { ...options, markNames: true })));
   }
 
   appendShareEvent(log, action, data = {}) {
@@ -850,6 +850,29 @@ function splitLongLine(line, limit) {
   }
   pieces.push(rest);
   return pieces;
+}
+
+// The quiet last line of a report for Discord: the module name linked to its package page, as Discord's small grey
+// subtext. The angle brackets keep Discord from adding a link preview. Empty when the GM turned it off.
+export function discordCredit() {
+  if (getSetting(SETTINGS.DISCORD_CREDIT, true) === false) return "";
+  return `-# [${discordText(localize("SCLS.Discord.Credit"))}](<${PACKAGE_URL}>)`;
+}
+
+// Discord messages of a report with the credit line at the end of the last one. The credit never costs an extra
+// message: when the last message has no room left for it, the report goes without it.
+export function discordReportMessages(text, credit = discordCredit()) {
+  const messages = splitDiscordMessage(text);
+  if (!credit || !messages.length) return messages;
+  const last = `${messages.at(-1)}\n\n${credit}`;
+  if (last.length <= DISCORD_MESSAGE_LIMIT) messages[messages.length - 1] = last;
+  return messages;
+}
+
+// The credit line in the Sharing preview, marked as Discord only. Chat cards and journal reports never get it.
+export function discordCreditPreviewHtml() {
+  if (!discordCredit()) return "";
+  return `<p class="scls-report-preview__credit"><i class="fa-brands fa-discord" aria-hidden="true"></i> <span>${escapeHtml(localize("SCLS.Discord.CreditPreview"))}</span> <a href="${PACKAGE_URL}" target="_blank" rel="noopener">${escapeHtml(localize("SCLS.Discord.Credit"))}</a></p>`;
 }
 
 export const __test__ = { normalizeReportSections, reportContext, participantDirectory, shareableEvents, journalOwnership, rescueIncidents, isCorrectionEvent, discordText, splitDiscordMessage };
