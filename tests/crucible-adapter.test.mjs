@@ -184,6 +184,8 @@ test("targets, confirmation flags and chat text follow the Crucible card", () =>
   });
   assert.equal(adapter.readConfirmation({}, { flags: { crucible: { confirmed: true } } }), true);
   assert.equal(adapter.readConfirmation({}, { flags: { crucible: { confirmed: false } } }), false);
+  assert.equal(adapter.readConfirmation({}, { flags: { crucible: { confirmed: false, reversed: true } } }), false);
+  assert.equal(adapter.readConfirmation({}, { flags: { crucible: { reversed: true } } }), false);
   assert.equal(adapter.readConfirmation({}, { content: "x" }), null);
   assert.deepEqual(adapter.extractChatApplications({ content: "Orc takes 7 damage." }), []);
 });

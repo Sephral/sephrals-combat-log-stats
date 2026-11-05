@@ -725,7 +725,7 @@ export class CombatLogService {
   }
 
   // Credits the changes of one update to the action card: its actor is the source, its action the name.
-  // An undone card turns the changes into corrections and opens the card again.
+  // An undone card turns the changes into corrections and sets its outcome back.
   applyPlannedAttribution(log, events, { actionEventId, outcomeIndex, reversal = false, confidence = CONFIDENCE.SAFE } = {}) {
     const action = (log.events ?? []).find((entry) => entry.id === actionEventId);
     const outcome = action?.data?.outcomes?.[outcomeIndex];

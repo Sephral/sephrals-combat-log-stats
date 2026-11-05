@@ -142,8 +142,8 @@ export class CombatStatsService {
       const healingBefore = source?.healingNet ?? 0;
       switch (event.type) {
         case EVENT_TYPES.ACTION_USED:
-          // An action card counts as rolled damage, like a damage roll in other systems. Deleted cards never happened.
-          if (event.data?.status === ACTION_STATUS.DELETED) break;
+          // An action card counts as rolled damage, like a damage roll in other systems. Deleted and undone cards don't.
+          if ([ACTION_STATUS.DELETED, ACTION_STATUS.REVERSED].includes(event.data?.status)) break;
           if (isOpenAction(event)) summary.openActions += 1;
           summary.grossDamageRolled += Number(event.data?.plannedDamage) || 0;
           summary.grossHealingRolled += Number(event.data?.plannedHealing) || 0;

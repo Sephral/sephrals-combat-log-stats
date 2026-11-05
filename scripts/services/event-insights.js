@@ -163,10 +163,11 @@ export function downState(event) {
   return String(event?.data?.downState ?? "");
 }
 
-// A Crucible action card the GM has not confirmed (yet, or again after undoing it).
+// A Crucible action card the GM has not confirmed yet. An undone card waits for nothing: since Crucible 0.11.3 it
+// cannot be confirmed again.
 export function isOpenAction(event) {
   if (event?.type !== EVENT_TYPES.ACTION_USED || event.ignored) return false;
-  return [ACTION_STATUS.PENDING, ACTION_STATUS.REVERSED].includes(event?.data?.status ?? ACTION_STATUS.PENDING);
+  return (event?.data?.status ?? ACTION_STATUS.PENDING) === ACTION_STATUS.PENDING;
 }
 
 // Natural dice of a test as a share of the best possible result, 0 to 1. One kept d20, or a dice pool without d20

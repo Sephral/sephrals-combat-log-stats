@@ -162,7 +162,7 @@ test("a killing blow names the state and counts as a takedown", async () => {
   assert.equal(computed.summary.enemiesDefeated, 1);
 });
 
-test("undoing a confirmed card becomes a correction and opens the card again", async () => {
+test("undoing a confirmed card becomes a correction and closes the card", async () => {
   const { service, log, orc } = fixture();
   await service.chatMessageCreated(strikeCard("card1", { health: -12 }));
   await changeResources(service, orc, { health: 0 });
@@ -187,15 +187,39 @@ test("undoing a confirmed card becomes a correction and opens the card again", a
   assert.equal(row(computed, "c-orc").damageTakenNet, 0);
   assert.equal(row(computed, "c-hero").takedowns, 0);
   assert.equal(computed.summary.damageCorrectionsDown, 12);
-  assert.equal(computed.summary.openActions, 1);
+  assert.equal(computed.summary.openActions, 0);
+  assert.equal(computed.summary.grossDamageRolled, 0);
+  assert.equal(row(computed, "c-hero").damageRolled, 0);
 
-  // Confirming again matches the card again.
+  // Crucible up to 0.11.2 can confirm the card again, which matches it again.
   await changeResources(service, orc, { health: 0 });
   await service.chatMessageUpdated({ id: "card1" }, { flags: { crucible: { confirmed: true } } });
   computed = stats(log);
   assert.equal(deltas(log)[2].data.sourceCombatantId, "c-hero");
   assert.equal(row(computed, "c-hero").damageAppliedNet, 12);
   assert.equal(row(computed, "c-hero").takedowns, 1);
+  assert.equal(computed.summary.grossDamageRolled, 12);
+});
+
+test("a card reversed before anyone confirmed it is over: nothing open, nothing rolled, no critical", async () => {
+  const { service, log } = fixture();
+  const card = strikeCard("card1", { health: -5 });
+  card.rolls[0].isCriticalSuccess = true;
+  await service.chatMessageCreated(card);
+  let computed = stats(log);
+  assert.equal(computed.summary.openActions, 1);
+  assert.equal(computed.summary.grossDamageRolled, 5);
+  assert.equal(computed.summary.criticalHits, 1);
+
+  // Interpose in Crucible 0.11.3: only this flag changes, no pool moved.
+  await service.chatMessageUpdated({ id: "card1" }, { flags: { crucible: { reversed: true } } });
+  assert.equal(actionEvent(log, "card1").data.status, ACTION_STATUS.REVERSED);
+  computed = stats(log);
+  assert.equal(computed.summary.openActions, 0);
+  assert.equal(computed.summary.grossDamageRolled, 0);
+  assert.equal(computed.summary.criticalHits, 0);
+  assert.equal(row(computed, "c-hero").damageRolled, 0);
+  assert.equal(deltas(log).length, 0);
 });
 
 test("equal open cards wait for the confirmation of their message", async () => {

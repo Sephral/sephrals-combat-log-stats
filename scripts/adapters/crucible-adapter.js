@@ -199,9 +199,11 @@ export class CrucibleSystemAdapter extends GenericSystemAdapter {
   }
 
   // true when an update confirmed an action card, false when the GM reversed it, null for other updates.
+  // Interpose on a card nobody confirmed sets only `reversed` (Crucible 0.11.3).
   readConfirmation(_message, changed = {}) {
     const value = getProperty(changed, "flags.crucible.confirmed");
-    return typeof value === "boolean" ? value : null;
+    if (typeof value === "boolean") return value;
+    return getProperty(changed, "flags.crucible.reversed") === true ? false : null;
   }
 
   controlStatuses() {
