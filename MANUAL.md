@@ -194,7 +194,7 @@ With the GM’s consent only the active GM’s browser counts, and it sends at m
 * on how many of the last 30 days the module was used
 * how often combats are logged, a log is corrected, sharing options are saved, reports are posted to the chat, written to a journal or copied for Discord, logs are exported and the self test runs
 * the settings *Default report detail*, *Damage per round basis* and *Players can view combat statistics* (only the chosen option)
-* where errors occur in the module code: file, line and error type, never the error message
+* where errors occur in the module code: file, line, error type and whether the error arose in the module itself, in Foundry, in the game system or in another module, never the error message or the name of another module
 
 No names, chat messages, notes, dice results or other content of the world are sent.
 
