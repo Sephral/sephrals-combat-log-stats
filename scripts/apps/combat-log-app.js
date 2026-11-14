@@ -9,6 +9,7 @@ import { ALL_SESSIONS, groupSessions, renderSessionHtml, sessionDiscordMessages,
 import { CombatStatsService } from "../services/stats-service.js";
 import { isCrucibleLog, termKey } from "../services/system-terms.js";
 import { combatantBarChart, roundDamageChart } from "./charts.js";
+import { NIGHT_PREFIX, allEvents } from "../services/offcombat-log.js";
 import { sessionPanel } from "./session-panel.js";
 import { countFeature } from "../usage.mjs";
 import {
@@ -72,6 +73,11 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     this.liveRenderQueued = false;
     this.onLogUpdated = (log) => this.scheduleLiveRender(log);
     globalThis.Hooks?.on?.(HOOKS.LOG_UPDATED, this.onLogUpdated);
+    // Entries outside the fights only change the Sessions tab.
+    this.onOffCombatUpdated = () => {
+      if (this.activeTab === "sessions") this.scheduleLiveRender(null);
+    };
+    globalThis.Hooks?.on?.(HOOKS.OFF_COMBAT_UPDATED, this.onOffCombatUpdated);
   }
 
   // Resolved on every render so the module language setting applies to the window title.
@@ -81,6 +87,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
 
   async close(options = {}) {
     globalThis.Hooks?.off?.(HOOKS.LOG_UPDATED, this.onLogUpdated);
+    globalThis.Hooks?.off?.(HOOKS.OFF_COMBAT_UPDATED, this.onOffCombatUpdated);
     this.tabObserver?.disconnect();
     this.tabObserver = null;
     return super.close(options);
@@ -252,10 +259,27 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
   async sessionsFor(entries, readOnly) {
     if (this.activeTab !== "sessions") return null;
     const logs = await this.allLogs(entries, { playerView: readOnly });
+    // What happened outside the fights is for the GM.
+    const off = readOnly ? null : await this.offCombatEvents();
+    const panel = sessionPanel(logs, { selectedId: this.sessionId, statsOptions: this.statsOptions(), offEvents: off?.events ?? null, offDropped: off?.dropped ?? 0 });
+    if (panel.between?.has && this.offViewed !== panel.selectedId) {
+      this.offViewed = panel.selectedId;
+      countFeature(MODULE_ID, "offCombatViewed");
+    }
     return {
-      ...sessionPanel(logs, { selectedId: this.sessionId, statsOptions: this.statsOptions() }),
+      ...panel,
       sharingEnabled: getSetting(SETTINGS.ENABLE_PLAYER_SHARING, true) !== false
     };
+  }
+
+  // The log outside fights, when it is on or holds entries.
+  async offCombatEvents() {
+    const store = this.service.offCombat;
+    if (!store) return null;
+    const state = await store.snapshotState();
+    const events = allEvents(state);
+    if (!events.length && getSetting(SETTINGS.OFF_COMBAT_LOG, true) === false) return null;
+    return { events, dropped: state.nights.reduce((total, night) => total + night.dropped, 0) };
   }
 
   // Every stored fight with its numbers. playerView: each fight as players may see it (player-view-service.js).
@@ -272,6 +296,8 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
 
   // The selected session for chat or Discord, told from what players may see of each of its fights.
   async sessionReportFor({ markNames = false } = {}) {
+    // A night without a fight has no fight numbers to report.
+    if (this.sessionId?.startsWith?.(NIGHT_PREFIX)) return null;
     const logs = await this.allLogs(await this.service.persistence.loadHistoryEntries());
     const sessions = groupSessions(logs);
     if (!sessions.length) return null;

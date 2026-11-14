@@ -8,6 +8,8 @@ export const TESTED_VERSIONS = Object.freeze({ core: "14.370", dnd5e: "6.0.6", c
 
 export const HOOKS = Object.freeze({
   LOG_UPDATED: `${MODULE_ID}.logUpdated`,
+  // The log outside fights got an entry (for an open window; not part of the public API).
+  OFF_COMBAT_UPDATED: `${MODULE_ID}.offCombatUpdated`,
   LANGUAGE_CHANGED: `${MODULE_ID}.languageChanged`,
   PLAYER_ACCESS_CHANGED: `${MODULE_ID}.playerAccessChanged`
 });
@@ -36,6 +38,10 @@ export const SETTINGS = Object.freeze({
   DEFAULT_ANONYMIZE_ENEMIES: "defaultAnonymizeEnemies",
   AUTO_POST_PLAYER_SUMMARY_ON_END: "autoPostPlayerSummaryOnEnd",
   AUTO_EXPORT_JOURNAL_ON_END: "autoExportJournalOnEnd",
+  END_CARD_MODE: "endCardMode",
+  OFF_COMBAT_LOG: "offCombatLog",
+  OFF_COMBAT_SCOPE: "offCombatScope",
+  OFF_COMBAT_DATA: "offCombatData",
   DISCORD_CREDIT: "discordCredit",
   RETENTION_DAYS: "retentionDays",
   RESOURCE_PATHS: "resourcePaths",
@@ -43,6 +49,11 @@ export const SETTINGS = Object.freeze({
   DEBUG_MODE: "debugMode",
   ACKNOWLEDGED_VERSIONS: "acknowledgedVersions"
 });
+
+// Who gets the short card when a fight ends.
+export const END_CARD_MODES = Object.freeze({ OFF: "off", GM: "gm", EVERYONE: "everyone" });
+// Whose changes outside a fight are logged: player characters, or every actor.
+export const OFF_COMBAT_SCOPES = Object.freeze({ PARTY: "party", ALL: "all" });
 
 export const LOG_STATUS = Object.freeze({
   ACTIVE: "active",

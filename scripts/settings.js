@@ -1,4 +1,4 @@
-import { DEFAULT_RESOURCE_PATHS, DPR_METHODS, HOOKS, LANGUAGE_MODES, MODULE_ID, SETTINGS, SHARE_MODES } from "./constants.js";
+import { DEFAULT_RESOURCE_PATHS, DPR_METHODS, END_CARD_MODES, HOOKS, LANGUAGE_MODES, MODULE_ID, OFF_COMBAT_SCOPES, SETTINGS, SHARE_MODES } from "./constants.js";
 import { selfTestMenuClass } from "./selftest.js";
 
 // Order is the order in Foundry's settings dialog. Language comes first, like in the other Sephral modules.
@@ -7,6 +7,11 @@ const SETTING_DEFINITIONS = [
   [SETTINGS.ENABLE_AUTO_TRACKING, { scope: "world", config: true, type: Boolean, default: true }],
   [SETTINGS.AUTO_RESUME_ACTIVE_COMBATS, { scope: "world", config: true, type: Boolean, default: true }],
   [SETTINGS.SHOW_SUMMARY_ON_COMBAT_END, { scope: "client", config: true, type: Boolean, default: true }],
+  // A short card in the chat when a fight ends, with a button to the full report.
+  [SETTINGS.END_CARD_MODE, { scope: "world", config: true, type: String, choices: { [END_CARD_MODES.GM]: "SCLS.EndCardMode.gm", [END_CARD_MODES.EVERYONE]: "SCLS.EndCardMode.everyone", [END_CARD_MODES.OFF]: "SCLS.EndCardMode.off" }, default: END_CARD_MODES.GM }],
+  // Hit point and condition changes, deaths and rests between the fights, kept per game night.
+  [SETTINGS.OFF_COMBAT_LOG, { scope: "world", config: true, type: Boolean, default: true }],
+  [SETTINGS.OFF_COMBAT_SCOPE, { scope: "world", config: true, type: String, choices: { [OFF_COMBAT_SCOPES.PARTY]: "SCLS.OffCombatScope.party", [OFF_COMBAT_SCOPES.ALL]: "SCLS.OffCombatScope.all" }, default: OFF_COMBAT_SCOPES.PARTY }],
   [SETTINGS.TRACK_ACTIVE_EFFECTS, { scope: "world", config: true, type: Boolean, default: true }],
   [SETTINGS.INCLUDE_UNCLEAR_DELTAS_IN_STATS, { scope: "world", config: true, type: Boolean, default: false }],
   [SETTINGS.DEFAULT_DPR_METHOD, { scope: "world", config: true, type: String, choices: { [DPR_METHODS.APPLIED_NET]: "SCLS.DprMethod.appliedNet", [DPR_METHODS.APPLIED_GROSS]: "SCLS.DprMethod.appliedGross", [DPR_METHODS.ROLLED]: "SCLS.DprMethod.rolled" }, default: DPR_METHODS.APPLIED_NET }],
@@ -27,6 +32,8 @@ const SETTING_DEFINITIONS = [
   [SETTINGS.TRACK_ROLLS, { scope: "world", config: false, type: Boolean, default: true }],
   [SETTINGS.TRACK_RESOURCE_DELTAS, { scope: "world", config: false, type: Boolean, default: true }],
   [SETTINGS.RESOURCE_DELTA_WINDOW_MS, { scope: "world", config: false, type: Number, default: 60000 }],
+  // Where the log outside fights lives: a pointer to its file, or the nights themselves when no file can be written.
+  [SETTINGS.OFF_COMBAT_DATA, { scope: "world", config: false, type: Object, default: {} }],
   [SETTINGS.RESOURCE_PATHS, { scope: "world", config: false, type: Object, default: DEFAULT_RESOURCE_PATHS }],
   [SETTINGS.ACKNOWLEDGED_VERSIONS, { scope: "client", config: false, type: String, default: "" }]
 ];

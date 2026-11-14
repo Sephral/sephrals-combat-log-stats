@@ -9,7 +9,10 @@ import { CombatLogPersistenceService } from "./persistence-service.js";
 import { CombatStatsService } from "./stats-service.js";
 import { CorrelationService } from "./correlation-service.js";
 import { actorTrace, applicationTrace, buildDebugLog, collectEnvironment, DebugTrace, messageTrace } from "./debug-log-service.js";
+import { countFeature } from "../usage.mjs";
 import { PlayerReportService } from "./player-report-service.js";
+import { postEndCard } from "./end-card-service.js";
+import { OffCombatService } from "./offcombat-service.js";
 
 // How long a system damage application (dnd5e.preApplyDamage) waits for the matching hit point update.
 const APPLICATION_WINDOW_MS = 5000;
@@ -38,6 +41,8 @@ export class CombatLogService {
     this.persistDelayMs = persistDelayMs;
     this.correlation = new CorrelationService({ windowMs: getSetting(SETTINGS.RESOURCE_DELTA_WINDOW_MS, 60000) });
     this.playerReports = new PlayerReportService();
+    // Hit point and condition changes between the fights.
+    this.offCombat = new OffCombatService(this);
     this.adapter.registerSystemHooks?.(this);
   }
 
@@ -130,6 +135,7 @@ export class CombatLogService {
     this.activeLogs.delete(combat.id);
     await this.saveAndCompute(log, { immediate: true });
     await this.runEndOfCombatReports(log);
+    await this.runEndCard(log);
     return this.saveAndCompute(log, { immediate: true });
   }
 
@@ -142,6 +148,18 @@ export class CombatLogService {
     if (!this.playerReports.canShare(log)) return;
     if (autoPost) await this.playerReports.postChatSummary(log);
     if (autoJournal) await this.playerReports.createJournalReport(log);
+  }
+
+  // The short card in the chat. A card that fails to post never costs the log.
+  async runEndCard(log) {
+    try {
+      const message = await postEndCard(log, { statsOptions: this.statsOptions() });
+      if (message) countFeature(MODULE_ID, "endCardPosted");
+      return message;
+    } catch (error) {
+      console.warn(`${MODULE_ID} | Could not post the end of combat card`, error);
+      return null;
+    }
   }
 
   async deleteCombat(combat) {

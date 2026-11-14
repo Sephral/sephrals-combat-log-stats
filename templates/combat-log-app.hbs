@@ -75,12 +75,13 @@
         </label>
         {{#unless readOnly}}
         <div class="scls-share-actions">
-          <button type="button" data-action="postSessionReport" title="{{sclsLocalize "SCLS.Session.Post"}}" {{#unless sessions.sharingEnabled}}disabled{{/unless}}><i class="fa-solid fa-message" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Session.Post"}}</span></button>
-          <button type="button" data-action="copySessionDiscord" title="{{sclsLocalize "SCLS.Button.CopyDiscord"}}"><i class="fa-brands fa-discord" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.CopyDiscord"}}</span></button>
+          <button type="button" data-action="postSessionReport" title="{{sclsLocalize "SCLS.Session.Post"}}" {{#unless sessions.sharingEnabled}}disabled{{else}}{{#if sessions.offOnly}}disabled{{/if}}{{/unless}}><i class="fa-solid fa-message" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Session.Post"}}</span></button>
+          <button type="button" data-action="copySessionDiscord" {{#if sessions.offOnly}}disabled{{/if}} title="{{sclsLocalize "SCLS.Button.CopyDiscord"}}"><i class="fa-brands fa-discord" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.CopyDiscord"}}</span></button>
         </div>
         {{/unless}}
       </div>
       <p class="scls-muted scls-session-range">{{sessions.rangeLabel}}</p>
+      {{#unless sessions.offOnly}}
       <div class="scls-grid scls-grid--cards">
         {{#each sessions.cards}}<div class="scls-metric{{#if this.tone}} scls-metric--{{this.tone}}{{/if}}"><span>{{this.label}}</span><strong>{{this.value}}</strong></div>{{/each}}
       </div>
@@ -137,16 +138,26 @@
       {{#if sessions.isAll}}
       <h4>{{sclsLocalize "SCLS.Tab.sessions"}}</h4>
       <table class="scls-table">
-        <thead><tr><th></th><th>{{sclsLocalize "SCLS.Session.Select"}}</th><th>{{sclsLocalize "SCLS.Label.Fights"}}</th><th>{{sclsLocalize "SCLS.Label.Rounds"}}</th><th>{{sclsLocalize "SCLS.Label.PartyNetDamage"}}</th>{{#if sessions.enemyStats}}<th>{{sclsLocalize "SCLS.Label.EnemyDamage"}}</th>{{/if}}<th>{{sclsLocalize "SCLS.Label.EnemiesDefeated"}}</th><th>{{sclsLocalize "SCLS.Label.PartyDowned"}}</th></tr></thead>
+        <thead><tr><th></th><th>{{sclsLocalize "SCLS.Session.Select"}}</th><th>{{sclsLocalize "SCLS.Label.Fights"}}</th>{{#if @root.sessions.showOutside}}<th>{{sclsLocalize "SCLS.OffCombat.Outside"}}</th>{{/if}}<th>{{sclsLocalize "SCLS.Label.Rounds"}}</th><th>{{sclsLocalize "SCLS.Label.PartyNetDamage"}}</th>{{#if sessions.enemyStats}}<th>{{sclsLocalize "SCLS.Label.EnemyDamage"}}</th>{{/if}}<th>{{sclsLocalize "SCLS.Label.EnemiesDefeated"}}</th><th>{{sclsLocalize "SCLS.Label.PartyDowned"}}</th></tr></thead>
         <tbody>
           {{#each sessions.sessionRows}}
           <tr>
             <td class="scls-history-select-cell"><button type="button" data-action="selectSession" data-session-id="{{this.id}}" title="{{sclsLocalize "SCLS.Button.Open"}}"><i class="fa-solid fa-folder-open" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Open"}}</span></button></td>
-            <td><strong>{{this.label}}</strong></td><td>{{this.fights}}</td><td>{{this.rounds}}</td><td>{{this.partyDamage}}</td>{{#if @root.sessions.enemyStats}}<td>{{this.enemyDamage}}</td>{{/if}}<td>{{this.enemiesDefeated}}</td><td>{{this.partyDowned}}</td>
+            <td><strong>{{this.label}}</strong></td><td>{{this.fights}}</td>{{#if @root.sessions.showOutside}}<td>{{this.outside}}</td>{{/if}}<td>{{this.rounds}}</td><td>{{this.partyDamage}}</td>{{#if @root.sessions.enemyStats}}<td>{{this.enemyDamage}}</td>{{/if}}<td>{{this.enemiesDefeated}}</td><td>{{this.partyDowned}}</td>
           </tr>
           {{/each}}
         </tbody>
       </table>
+      {{#if sessions.nightRows.length}}
+      <h4>{{sclsLocalize "SCLS.OffCombat.Nights"}}</h4>
+      <table class="scls-table">
+        <tbody>
+          {{#each sessions.nightRows}}
+          <tr><td class="scls-history-select-cell"><button type="button" data-action="selectSession" data-session-id="{{this.id}}" title="{{sclsLocalize "SCLS.Button.Open"}}"><i class="fa-solid fa-folder-open" aria-hidden="true"></i><span>{{sclsLocalize "SCLS.Button.Open"}}</span></button></td><td><strong>{{this.label}}</strong></td><td>{{this.count}}</td></tr>
+          {{/each}}
+        </tbody>
+      </table>
+      {{/if}}
       {{else}}
       <h4>{{sclsLocalize "SCLS.Label.Fights"}}</h4>
       <table class="scls-table">
@@ -160,6 +171,30 @@
           {{/each}}
         </tbody>
       </table>
+      {{/if}}
+      {{/unless}}
+      {{#if sessions.between}}
+      <section class="scls-between">
+        <h4>{{sclsLocalize "SCLS.OffCombat.Title"}}</h4>
+        {{#if sessions.between.has}}
+        <div class="scls-grid scls-grid--cards">
+          {{#each sessions.between.cards}}<div class="scls-metric{{#if this.tone}} scls-metric--{{this.tone}}{{/if}}"><span>{{this.label}}</span><strong>{{this.value}}</strong></div>{{/each}}
+        </div>
+        <table class="scls-table scls-between__actors">
+          <thead><tr><th>{{sclsLocalize "SCLS.Label.Name"}}</th><th>{{sclsLocalize "SCLS.OffCombat.Label.Lost"}}</th><th>{{sclsLocalize "SCLS.OffCombat.Label.Regained"}}</th><th>{{sclsLocalize "SCLS.OffCombat.Label.Downs"}}</th><th>{{sclsLocalize "SCLS.OffCombat.Label.Conditions"}}</th><th>{{sclsLocalize "SCLS.OffCombat.Label.Rests"}}</th></tr></thead>
+          <tbody>
+            {{#each sessions.between.actors}}<tr><td>{{this.name}}</td><td>{{this.lost}}</td><td>{{this.regained}}</td><td>{{this.downs}}</td><td>{{this.conditions}}</td><td>{{this.rests}}</td></tr>{{/each}}
+          </tbody>
+        </table>
+        <ul class="scls-between__lines">
+          {{#each sessions.between.lines}}<li class="scls-between__line{{#if this.tone}} scls-between__line--{{this.tone}}{{/if}}"><i class="{{this.icon}}" aria-hidden="true"></i><span class="scls-between__time">{{this.time}}</span><span>{{this.text}}</span></li>{{/each}}
+        </ul>
+        {{#if sessions.between.hiddenCount}}<p class="scls-muted">{{sclsLocalize "SCLS.OffCombat.More"}} ({{sessions.between.hiddenCount}})</p>{{/if}}
+        {{#if sessions.between.note}}<p class="scls-muted">{{sessions.between.note}}</p>{{/if}}
+        {{else}}
+        <p class="scls-muted">{{sclsLocalize "SCLS.OffCombat.Empty"}}</p>
+        {{/if}}
+      </section>
       {{/if}}
       <p class="scls-muted scls-session-hint">{{sclsLocalize "SCLS.Session.Hint"}}{{#unless readOnly}} {{sclsLocalize "SCLS.Session.ShareHint"}}{{/unless}}</p>
       {{else}}

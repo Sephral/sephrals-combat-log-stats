@@ -1,4 +1,4 @@
-import { MODULE_ID, SETTINGS, TESTED_VERSIONS } from "./constants.js";
+import { END_CARD_MODES, MODULE_ID, OFF_COMBAT_SCOPES, SETTINGS, TESTED_VERSIONS } from "./constants.js";
 import { getSystemAdapter } from "./adapters/adapter-registry.js";
 import { escapeHtml, format, getProperty, localize } from "./utils.js";
 import { countFeature } from "./usage.mjs";
@@ -42,6 +42,16 @@ async function checkIntegrations(service) {
     console.warn(`${MODULE_ID} | Self-test could not read the combat logs`, error);
   }
   check(Array.isArray(index?.logs), "Storage");
+
+  // The card at the end of a fight and the log outside fights.
+  check(Object.values(END_CARD_MODES).includes(game.settings.get(MODULE_ID, SETTINGS.END_CARD_MODE)) && typeof ChatMessage?.getWhisperRecipients === "function", "EndCard");
+  let nights = null;
+  try {
+    nights = await service?.offCombat?.nights();
+  } catch (error) {
+    console.warn(`${MODULE_ID} | Self-test could not read the log outside fights`, error);
+  }
+  check(Array.isArray(nights) && Object.values(OFF_COMBAT_SCOPES).includes(game.settings.get(MODULE_ID, SETTINGS.OFF_COMBAT_SCOPE)), "OffCombat");
 
   if (ui.combat?.rendered && ui.combat.viewed) check(!!ui.combat.element?.querySelector?.(".scls-combat-tracker-button"), "Tracker");
   return { problems, checks, actor };

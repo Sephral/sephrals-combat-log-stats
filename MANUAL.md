@@ -7,7 +7,7 @@ This manual covers the details. For a quick overview see the [README](README.md)
 1. Start a combat in the combat tracker as usual. The log starts automatically.
 2. Play. Roll and apply damage and healing from the chat cards as you always do.
 3. Open the window from the token controls (chart icon) or with the button in the combat tracker.
-4. When you end the combat, the summary opens (can be turned off).
+4. When you end the combat, a short summary card appears in the chat (see [Summary card at the end of a fight](#summary-card-at-the-end-of-a-fight)) and the full summary opens (can be turned off).
 5. Check the Corrections tab for hit point changes the log could not explain, then share a report from the Sharing tab.
 
 The window has the tabs History and Sessions for all fights, and Summary, Round Log, Statistics, Impact Meter, Corrections, Participants and Sharing for the selected fight. In a narrow window the tabs show their icons only. Point at an icon to see the name of its tab.
@@ -88,9 +88,32 @@ The Sessions tab adds up the fights of one game session, or of all sessions at o
 
 *Post to Chat* and *Copy for Discord* share the session as a short recap. Both use only what players may see of each fight, with the sharing choices of that fight, and posting needs *Allow player reports*. The Discord copy ends with the same small credit line as the player report (see [Sharing](#sharing)).
 
+## Between the fights
+
+The log outside combat records what happens to the party between the fights, so the Sessions tab also tells what happened since the last fight. It is on by default (*Log outside combat*) and only the recording GM writes it.
+
+* **What is recorded:** changes of hit points (in Crucible health, wounds, morale and madness), a character dropping to 0, conditions that are added or removed, deaths (the status dead or defeated) and rests. Statuses the game sets by itself, such as bloodied, concentrating or encumbered, are left out.
+* **Whose changes:** *Outside combat: whose changes* picks player characters only (default) or every actor of the world. Actors that take part in a running fight are left out: the log of that fight has them. After the fight they count again.
+* **Rests:** in D&D 5e a rest is one entry with the hit points regained. When the GM rests a character the entry says short or long rest, when a player rests on their own screen it says only that the character rested, because D&D 5e tells the kind of rest only to the screen that rested.
+* **Where you see it:** in the Sessions tab, in the block *Outside combat* of the selected session, with cards for hit points lost and regained, characters down, conditions and rests, one row per character and the entries in time order. An entry belongs to the session it lies in or the nearest one less than 6 hours away. Entries without a fight within 6 hours make a game night of their own, listed in the session list as *no fight*, with only this block. With *All sessions* a column counts the entries per session and the nights without a fight are listed below.
+* **For the GM only:** players never get the block, the entries or the nights.
+* **Kept small:** changes of one character in the same direction within 30 seconds are one entry. A game night keeps at most 200 entries (the oldest go, the block says how many), the latest 20 nights are kept, and *History retention days* removes older nights too. An entry takes about 60 to 100 characters.
+
 ## Corrections
 
 The Corrections tab lists every hit point change the log could not explain. The GM can reclassify unclear changes, set the source of damage nobody claimed, add or reduce damage and healing by hand and ignore entries.
+
+## Summary card at the end of a fight
+
+When a tracked fight ends, a short card appears in the chat: how long it lasted, who did the most damage, critical hits and fumbles of the party, who went down, how many enemies were defeated and how much was healed. A button opens the full report of that fight in the log window. Lines without anything to say are left out, and a fight that lasted one round without anything happening gets no card.
+
+*Summary card when a fight ends* picks who gets it:
+
+* **Whisper to the GM** (default): only the GMs see the card.
+* **Everyone:** the card goes to the whole table. It tells only what the player report of that fight would show: the sharing choices of the fight apply, hidden combatants and what they did stay out, enemies are only counted. While *Allow player reports* is off, the card goes to the GMs only.
+* **Off:** no card.
+
+The button works for everyone who may open the log window (*Players can view combat statistics*). Players get the read only window. The card is independent of *Post player report when combat ends*, which posts the long report. With both on, both appear.
 
 ## Sharing
 
@@ -156,6 +179,9 @@ Excel with German regional settings expects semicolons in CSV files. Import the 
 | Track combats automatically | world | Start a log for every combat |
 | Resume active combats after reload | world | Continue running logs after a reload |
 | Open report when combat ends | you | Open the summary at the end of a combat |
+| Summary card when a fight ends | world | Short card in the chat: whisper to the GM (default), everyone or off |
+| Log outside combat | world | Record hit point and condition changes, deaths and rests between the fights, on by default |
+| Outside combat: whose changes | world | Player characters only (default) or all actors |
 | Track conditions and effects | world | Record conditions and count control plays |
 | Include unclear HP changes | world | Count unclear hit point changes before the GM checks them |
 | Damage per round basis | world | Applied net, applied gross or rolled damage |
@@ -192,8 +218,8 @@ The module can take part in a small usage report shared by all of Sephral’s mo
 With the GM’s consent only the active GM’s browser counts, and it sends at most one report a day. The counts are kept in a hidden world setting, so all browsers and computers of the GM count together, and turning the statistics off deletes them. A copy of a world gets its own world ID. The question lists everything the report contains, from the Foundry version to a random world ID. For Combat Log & Stats it holds:
 
 * on how many of the last 30 days the module was used
-* how often combats are logged, a log is corrected, sharing options are saved, reports are posted to the chat, written to a journal or copied for Discord, logs are exported and the self test runs
-* the settings *Default report detail*, *Damage per round basis* and *Players can view combat statistics* (only the chosen option)
+* how often combats are logged, the card at the end of a fight is posted and opened, a game night gets its first entry outside combat and the entries outside combat are viewed, a log is corrected, sharing options are saved, reports are posted to the chat, written to a journal or copied for Discord, logs are exported and the self test runs
+* the settings *Summary card when a fight ends*, *Log outside combat*, *Outside combat: whose changes*, *Default report detail*, *Damage per round basis* and *Players can view combat statistics* (only the chosen option)
 * where errors occur in the module code: file, line, error type and whether the error arose in the module itself, in Foundry, in the game system or in another module, never the error message or the name of another module
 
 No names, chat messages, notes, dice results or other content of the world are sent.
@@ -205,6 +231,8 @@ Combat logs are saved inside your world. They are never written into actors, ite
 Foundry has no storage that only the GM can read. A player who knows where to look could open the stored logs, so whispers and chat text are kept out of them.
 
 On The Forge with Foundry v14 the logs go to your Assets Library, in the folder `sephrals-combat-log-stats`. Logs from earlier versions move there automatically.
+
+The log outside combat has its own small file, `off-combat.json`, next to the combat log store, and the world setting only points to it. Foundry 13 cannot write files from the browser, there the entries stay inside a world setting (at most about 20 nights of 200 entries). Like all world settings, that setting can be read by a player who knows where to look, so switch off *Log outside combat* in a world where that matters on Foundry 13.
 
 ## API
 

@@ -300,7 +300,7 @@ function refusePlayer(action) {
   return true;
 }
 
-function withTimeout(promise, timeoutMs, message) {
+export function withTimeout(promise, timeoutMs, message) {
   let timeoutId = null;
   const timeout = new Promise((_, reject) => {
     timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
@@ -310,12 +310,12 @@ function withTimeout(promise, timeoutMs, message) {
 
 // The Forge may declare ForgeVTT/ForgeAPI as top-level classes of a classic script: global bindings that are
 // not globalThis properties, so they are read by name behind typeof guards.
-function isTheForge() {
+export function isTheForge() {
   return typeof ForgeVTT !== "undefined" && ForgeVTT?.usingTheForge === true;
 }
 
 // Absolute Assets Library URL of a relative path on The Forge, or null when it cannot be determined.
-async function forgeAssetUrl(relativePath) {
+export async function forgeAssetUrl(relativePath) {
   const prefix = typeof ForgeVTT !== "undefined" ? ForgeVTT?.ASSETS_LIBRARY_URL_PREFIX : null;
   if (!prefix || typeof ForgeAPI === "undefined" || typeof ForgeAPI?.getUserId !== "function") return null;
   try {
@@ -328,11 +328,11 @@ async function forgeAssetUrl(relativePath) {
   }
 }
 
-function isAbsoluteUrl(path) {
+export function isAbsoluteUrl(path) {
   return /^https?:\/\//i.test(String(path ?? ""));
 }
 
-function supportsClientFileUpload() {
+export function supportsClientFileUpload() {
   const generation = Number(game?.release?.generation ?? String(game?.version ?? "").split(".")[0]);
   return !Number.isFinite(generation) || generation >= 14;
 }

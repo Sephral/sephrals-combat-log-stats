@@ -11,22 +11,24 @@
 ## Highlights
 
 * **Records itself:** start a combat as usual and the log runs in the background, round by round. A reload does not stop it.
+* **A summary when the fight ends:** a short card in the chat tells rounds, top damage, critical hits, fumbles, who went down and healing, with a button to the full report. Whispered to you by default, or for everyone.
+* **A log outside combat too:** hit point and condition changes, deaths and rests between the fights, kept per game night so you see what happened since the last fight.
 * **Every number that matters:** damage dealt and taken, healing, takedowns, times downed, critical hits, fumbles, control plays and damage per round for every combatant.
-* **Credit where credit is due:** in D&D 5e every hit and every heal applied from a chat card goes to the combatant who rolled it, overkill included, also when Midi-QOL applies the damage. In other systems the module matches hit point changes to the rolls behind them.
-* **Made for Crucible too:** health, wounds, morale and madness, heroes who end up Weakened, Broken or Dead, and every action card you confirm credited to the one who used it.
-* **Impact Meter, charts and awards:** a sortable ranking of the fight, damage per round for the party and the enemies, and awards such as MVP, Best Healer, Damage Sponge and Lucky Dice.
-* **Game nights at a glance:** the Sessions tab adds up every fight of an evening or of the whole campaign, with total damage and healing, the party against the enemies, every hero and the awards of the night. Post it to chat or copy it for Discord.
-* **Recaps for the whole table:** share a report in chat, as a journal entry or straight into Discord. Pick sections such as Hero Moments, Close Calls, Damage Spotlight or Tactical Turning Points and check the live preview before anyone else sees it.
-* **Players can look too, your secrets stay secret:** your players open the same window read only, with the sharing choices you made for each fight. Enemy names, hidden combatants and enemy numbers can stay hidden, GM notes and private rolls never appear.
-* **You have the last word:** anything the log could not explain waits in the Corrections tab, you can add or reduce damage and healing by hand, and every fight exports as JSON, Markdown or CSV.
+* **Credit where credit is due:** in D&D 5e every hit and heal goes to the combatant who rolled it, also with Midi-QOL. Other systems match hit point changes to the rolls behind them.
+* **Made for Crucible too:** health, wounds, morale, madness and every confirmed action card credited to its user.
+* **Impact Meter and awards:** a sortable ranking, damage per round for both sides, and awards such as MVP and Lucky Dice.
+* **Game nights at a glance:** the Sessions tab adds up every fight of an evening or of the whole campaign. Post it to chat or copy it for Discord.
+* **Recaps for the table:** share a report in chat, as a journal or in Discord, with a preview first.
+* **Players can look too:** the same window, read only. Enemy names and numbers can stay hidden, GM notes never appear.
+* **You have the last word:** correct or add damage and healing by hand, and export every fight as JSON, Markdown or CSV.
 
 ## How it works
 
 1. Start a combat in the combat tracker. The log starts with it.
 2. Play as always. Roll and apply damage and healing from the chat cards.
-3. End the combat. The summary opens, and the Sharing tab turns it into a report for your players.
+3. End the combat. A summary card appears in the chat, and the Sharing tab turns the fight into a report for your players.
 
-Open the window any time with the chart icon in the token controls or the button in the combat tracker.
+Open the window any time with the chart icon in the token controls.
 
 ## Install
 

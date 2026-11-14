@@ -85,6 +85,18 @@ function registerHooks() {
   });
   Hooks.on("updateActor", track((actor, changed, options, userId) => combatLogService.actorUpdated(actor, changed, options, userId)));
 
+  // The log outside fights. Every GM keeps the last values of the actors; only the recording GM writes entries.
+  const offCombat = (handler) => (...args) => {
+    if (!combatLogService || !isGM()) return;
+    void handler(combatLogService.offCombat, ...args);
+  };
+  Hooks.on("updateActor", offCombat((service, actor, changed, options) => service.actorUpdated(actor, changed, options)));
+  Hooks.on("createActiveEffect", offCombat((service, effect) => service.effectChanged(effect, true)));
+  Hooks.on("deleteActiveEffect", offCombat((service, effect) => service.effectChanged(effect, false)));
+  Hooks.on("dnd5e.restCompleted", offCombat((service, actor, result) => service.restCompleted(actor, result)));
+  Hooks.on("canvasReady", offCombat((service) => service.snapshotAll()));
+  Hooks.on("createToken", offCombat((service, token) => token?.actor && service.snapshot(token.actor)));
+
   Hooks.on("createActiveEffect", track((effect) => combatLogService.activeEffectChanged(EVENT_TYPES.ACTIVE_EFFECT_CREATED, effect, {})));
   Hooks.on("updateActiveEffect", track((effect, changed) => combatLogService.activeEffectChanged(EVENT_TYPES.ACTIVE_EFFECT_UPDATED, effect, changed)));
   Hooks.on("deleteActiveEffect", track((effect) => combatLogService.activeEffectChanged(EVENT_TYPES.ACTIVE_EFFECT_DELETED, effect, {})));
@@ -110,6 +122,24 @@ function registerHooks() {
   });
 
   Hooks.on("renderCombatTracker", injectCombatTrackerButton);
+  Hooks.on("renderChatMessageHTML", wireEndCard);
+}
+
+// The button of the card at the end of a fight opens the full report of that fight.
+function wireEndCard(message, html) {
+  const root = html?.[0] ?? html;
+  const button = root?.querySelector?.(".scls-endcard__open");
+  if (!button) return;
+  // Without access to the log window the card still tells its numbers.
+  if (!canViewCombatLogs()) {
+    button.remove();
+    return;
+  }
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    countFeature(MODULE_ID, "endCardOpened");
+    openCombatLog(button.dataset.sclsLogId || message?.getFlag?.(MODULE_ID, "endCard")?.logId || null);
+  });
 }
 
 function applyLanguageChange() {
@@ -138,8 +168,8 @@ Hooks.once("init", () => {
   registerSettings();
   registerDebug(() => combatLogService);
   registerUsage(MODULE_ID, {
-    features: ["combatLogged", "logCorrected", "sharingSaved", "reportPosted", "journalReport", "discordCopied", "logExported", "sessionShared", "selfTestRun"],
-    settings: [SETTINGS.DEFAULT_SHARE_MODE, SETTINGS.DEFAULT_DPR_METHOD, SETTINGS.PLAYER_STATS_ACCESS]
+    features: ["endCardPosted", "endCardOpened", "offCombatLogged", "offCombatViewed", "combatLogged", "logCorrected", "sharingSaved", "reportPosted", "journalReport", "discordCopied", "logExported", "sessionShared", "selfTestRun"],
+    settings: [SETTINGS.END_CARD_MODE, SETTINGS.OFF_COMBAT_LOG, SETTINGS.OFF_COMBAT_SCOPE, SETTINGS.DEFAULT_SHARE_MODE, SETTINGS.DEFAULT_DPR_METHOD, SETTINGS.PLAYER_STATS_ACCESS]
   });
   registerTemplateHelpers();
   registerHooks();
@@ -154,7 +184,10 @@ async function syncRecordingGM() {
   if (now === recording) return;
   recording = now;
   if (now) await combatLogService.ready();
-  else await combatLogService.releaseLogs();
+  else {
+    await combatLogService.offCombat.flush();
+    await combatLogService.releaseLogs();
+  }
 }
 
 Hooks.once("ready", async () => {
@@ -162,10 +195,13 @@ Hooks.once("ready", async () => {
   combatLogService = new CombatLogService();
   recording = isTrackingGM();
   await combatLogService.ready();
+  if (isGM()) combatLogService.offCombat.snapshotAll();
   Hooks.on("userConnected", () => void syncRecordingGM());
   // The index setting changes whenever a GM saves logs. Changes from another client make the local copy stale.
   const indexKey = `${MODULE_ID}.${SETTINGS.INDEX}`;
+  const offCombatKey = `${MODULE_ID}.${SETTINGS.OFF_COMBAT_DATA}`;
   const onIndexChanged = (setting, userId) => {
+    if (setting?.key === offCombatKey && userId !== game.user.id) combatLogService?.offCombat?.store.invalidate();
     if (setting?.key !== indexKey || userId === game.user.id) return;
     combatLogService?.persistence?.invalidate();
     // Players hold no live log: their open window shows the fight again as the GM just saved it.
@@ -176,6 +212,7 @@ Hooks.once("ready", async () => {
   // Writes are batched; a reload or closing the tab should not lose the last burst. The upload cannot finish
   // while the page unloads, so the waiting logs are also kept in the browser until the next start.
   globalThis.addEventListener?.("beforeunload", () => {
+    void combatLogService?.offCombat?.flush();
     combatLogService?.stashPendingSaves();
     void combatLogService?.flushPendingSaves();
   });
