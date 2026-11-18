@@ -1,6 +1,6 @@
 import { CONFIDENCE, EVENT_TYPES } from "../constants.js";
 import { ACTION_KINDS } from "../services/event-insights.js";
-import { GenericSystemAdapter } from "./generic-adapter.js";
+import { GenericSystemAdapter, rollFlag } from "./generic-adapter.js";
 
 // dnd5e 5.x writes the roll type to flags.dnd5e.roll.type (attack, damage, healing, save, ability,
 // skill, tool, death, hitDie, generic) and the source item and activity to flags.dnd5e.item/activity.
@@ -57,8 +57,8 @@ export class Dnd5eSystemAdapter extends GenericSystemAdapter {
     return {
       ...data,
       ...action,
-      isCritical: Boolean(roll?.isCritical),
-      isFumble: Boolean(roll?.isFumble),
+      isCritical: Boolean(rollFlag(roll, "isCritical")),
+      isFumble: Boolean(rollFlag(roll, "isFumble")),
       damageTypes: damageType ? [String(damageType)] : []
     };
   }

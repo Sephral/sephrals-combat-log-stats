@@ -149,7 +149,7 @@ function applyLanguageChange() {
     button.innerHTML = `<i class="fa-solid fa-chart-line" inert></i> ${localize("SCLS.SceneTool.Open")}`;
   }
   // reset: the tool titles are read again from getSceneControlButtons.
-  ui.controls?.render?.({ reset: true });
+  ui.controls?.render?.({ reset: true })?.catch?.(() => {});
 }
 
 // The GM turned player access on or off: players get or lose the tool and the button at once, an open window closes.
@@ -160,7 +160,7 @@ function applyPlayerAccessChange() {
     combatLogApp = null;
     for (const button of document.querySelectorAll(".scls-combat-tracker-button")) button.remove();
   } else ui.combat?.render?.();
-  ui.controls?.render?.({ reset: true });
+  ui.controls?.render?.({ reset: true })?.catch?.(() => {});
 }
 
 Hooks.once("init", () => {

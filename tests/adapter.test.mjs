@@ -307,3 +307,17 @@ test("dnd5e adapter takes the card whose button was just clicked, not for the to
     delete globalThis.game.messages;
   }
 });
+
+test("a roll whose isCritical getter throws still gets logged", () => {
+  // dnd5e reads isCritical from the d20 term, a roll made by another module without one throws there.
+  const broken = (dice) => Object.defineProperties({ formula: "10 + 5", total: 15, dice }, {
+    isCritical: { get() { throw new TypeError("Cannot read properties of undefined (reading 'isCriticalSuccess')"); } },
+    isFumble: { get() { throw new TypeError("Cannot read properties of undefined (reading 'isCriticalFailure')"); } }
+  });
+  assert.deepEqual(crit(broken([])), { isCritical: false, isFumble: false });
+  assert.deepEqual(crit(broken([d20(20)])), { isCritical: true, isFumble: false });
+  const dnd = new Dnd5eSystemAdapter();
+  const data = dnd.extractRollData(broken([]), { flavor: "Attack" });
+  assert.equal(data.isCritical, false);
+  assert.equal(data.isFumble, false);
+});

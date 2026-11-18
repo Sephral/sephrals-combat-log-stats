@@ -160,11 +160,23 @@ export function rollClassNames(roll) {
   return names.join(" ").toLowerCase();
 }
 
+// A property of a roll that the system computes. Its getter may throw: dnd5e reads isCritical from the d20 term, and a
+// roll another module made without a d20 has none. Such a roll then counts as having no answer.
+export function rollFlag(roll, key) {
+  try {
+    return roll?.[key];
+  } catch {
+    return undefined;
+  }
+}
+
 // Attacks and other tests: a natural 20 is a critical hit, a natural 1 a fumble. Damage and healing rolls never are.
 // A system that decides itself (roll.isCritical, roll.isFumble) keeps its own answer, for example for wider critical ranges.
 function criticalFlags(roll, type) {
   if (type === EVENT_TYPES.ROLL_DAMAGE || type === EVENT_TYPES.ROLL_HEALING) return { isCritical: false, isFumble: false };
-  if (typeof roll?.isCritical === "boolean" || typeof roll?.isFumble === "boolean") return { isCritical: roll.isCritical === true, isFumble: roll.isFumble === true };
+  const isCritical = rollFlag(roll, "isCritical");
+  const isFumble = rollFlag(roll, "isFumble");
+  if (typeof isCritical === "boolean" || typeof isFumble === "boolean") return { isCritical: isCritical === true, isFumble: isFumble === true };
   const natural = naturalD20(roll);
   return { isCritical: natural === 20, isFumble: natural === 1 };
 }
