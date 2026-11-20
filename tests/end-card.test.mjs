@@ -25,7 +25,7 @@ globalThis.ChatMessage = {
   }
 };
 
-const { endCardData, endCardLines, postEndCard, renderEndCardHtml, worthACard } = await import("../scripts/services/end-card-service.js");
+const { endCardData, endCardHighlights, endCardLines, postEndCard, renderEndCardHtml, shareEndCard, worthACard } = await import("../scripts/services/end-card-service.js");
 const { CombatStatsService } = await import("../scripts/services/stats-service.js");
 
 const START = "2026-11-14T19:00:00.000Z";
@@ -163,4 +163,88 @@ test("the card counts the party only: enemy crits, damage and healing stay out",
   assert.equal(players.fumbles, 0);
   assert.equal(players.healing, 4);
   assert.deepEqual(endCardData(computed, { durationMs: 5 }).durationMs, 5);
+});
+
+const hpEvent = (id, ms, combatantId, oldValue, newValue, extra = {}) => ({
+  id, type: EVENT_TYPES.RESOURCE_DELTA, createdAt: at(ms), round: 1, confidence: CONFIDENCE.PROBABLE, visibility: VISIBILITY.PUBLIC, combatantId,
+  data: { resourcePath: "system.attributes.hp.value", oldValue, newValue, delta: newValue - oldValue, interpretedAs: newValue < oldValue ? "damage" : "healing", targetCombatantId: combatantId, ...extra }
+});
+
+test("the biggest single hit names who, how much and with what, party only", () => {
+  const log = fightLog();
+  log.events.push({ ...log.events.find((event) => event.id === "d1"), id: "d4", combatantId: "bram", data: { amount: 31, targetCombatantId: "boss", actionName: "Fireball" } });
+  log.events.push({ ...log.events.find((event) => event.id === "d3"), id: "d5", data: { amount: 90, targetCombatantId: "aria" } });
+  const result = endCardHighlights(log.events, log.participants);
+  assert.deepEqual(result.biggestHit, { name: "Bram", amount: 31, action: "Fireball" });
+  assert.deepEqual(endCardHighlights([], []), { biggestHit: null, closeCall: null });
+  const lines = endCardLines(endCardData(log.computed, { highlights: result }), "dnd5e");
+  assert.ok(lines.includes("Biggest hit: Bram with 31 (Fireball)"));
+  assert.ok(endCardLines(endCardData(log.computed, { highlights: { biggestHit: { name: "A", amount: 4, action: "" }, closeCall: null } })).includes("Biggest hit: A with 4"));
+});
+
+test("the closest call is a hero who went down and came back, or one who stayed up with few hit points left", () => {
+  const log = fightLog();
+  assert.deepEqual(endCardHighlights(log.events, log.participants).closeCall, { name: "Bram", kind: "back" }, "Bram dropped and was healed");
+  const events = [hpEvent("a", 1000, "aria", 20, 6), hpEvent("b", 2000, "bram", 20, 9)];
+  const none = endCardHighlights(events, log.participants);
+  assert.equal(none.closeCall, null, "without the maximum hit points nothing counts as close");
+  const low = endCardHighlights(events, log.participants, { maxHp: (id) => (id === "aria" ? 20 : 40) });
+  assert.deepEqual(low.closeCall, { name: "Aria", kind: "low", hp: 6 });
+  const text = endCardLines(endCardData(log.computed, { highlights: low }), "dnd5e");
+  assert.ok(text.includes("Closest call: Aria was down to 6 HP"));
+  assert.ok(endCardLines(endCardData(log.computed, { highlights: low }), "crucible").includes("Closest call: Aria was down to 6 health"));
+  // Enemies never count as the closest call.
+  assert.equal(endCardHighlights([hpEvent("c", 1, "boss", 30, 1)], log.participants, { maxHp: () => 30 }).closeCall, null);
+});
+
+test("hits from ignored, undone, unclear or morale events do not count, German texts exist", () => {
+  const log = fightLog();
+  const hit = (id, extra) => ({ ...log.events.find((event) => event.id === "d1"), id, data: { amount: 99, targetCombatantId: "boss" }, ...extra });
+  const events = [hit("x1", { ignored: true }), hit("x2", { confidence: CONFIDENCE.UNCLEAR }), hit("x3", { data: { amount: 99, targetCombatantId: "boss", reversed: true } }), hit("x4", { data: { amount: 99, targetCombatantId: "boss", pool: "morale" } })];
+  assert.equal(endCardHighlights(events, log.participants).biggestHit, null);
+  for (const key of ["BiggestHit", "BiggestHitWith", "CloseBack", "CloseLow", "Share", "Shared"]) {
+    assert.ok(german[`SCLS.EndCard.${key}`], key);
+    assert.ok(!/[;]| - | – /.test(german[`SCLS.EndCard.${key}`] + english[`SCLS.EndCard.${key}`]), key);
+  }
+});
+
+test("the GM card carries a share button, the public card does not and says nothing the player view hides", async () => {
+  posted.length = 0;
+  settings.set(`${MODULE_ID}.${SETTINGS.ENABLE_PLAYER_SHARING}`, true);
+  await postEndCard(fightLog(), { mode: END_CARD_MODES.GM });
+  assert.ok(posted[0].content.includes("scls-endcard__share"));
+  assert.ok(posted[0].content.includes("Biggest hit: Aria with 30"));
+  assert.ok(posted[0].content.includes("went down and got back up"));
+  posted.length = 0;
+  await postEndCard(fightLog(), { mode: END_CARD_MODES.EVERYONE });
+  assert.ok(!posted[0].content.includes("scls-endcard__share"));
+  const shared = renderEndCardHtml(endCardData({ summary: { rounds: 2 }, byCombatant: [] }), { logId: "l", shareable: true, shared: true });
+  assert.ok(/scls-endcard__share"[^>]* disabled/.test(shared));
+  assert.ok(shared.includes("Shared with players"));
+});
+
+test("sharing posts a public card from the player view: hidden combatants, enemy numbers and detail follow the share mode", async () => {
+  posted.length = 0;
+  settings.set(`${MODULE_ID}.${SETTINGS.ENABLE_PLAYER_SHARING}`, true);
+  const message = await shareEndCard(fightLog({ hidden: true }));
+  assert.deepEqual(posted[0].whisper, []);
+  assert.equal(posted[0].flags[MODULE_ID].endCard.sharedByGm, true);
+  const text = message.content;
+  assert.ok(!text.includes("Goblin Boss"));
+  assert.ok(!text.includes("Biggest hit: Aria"), "the hit on the hidden boss is not part of the player view");
+  assert.ok(!text.includes("scls-endcard__share"));
+  // Summary only tells no single hits.
+  posted.length = 0;
+  const summary = await shareEndCard(fightLog({ share: { shareMode: "summaryOnly" } }));
+  assert.ok(!summary.content.includes("Biggest hit"));
+  assert.ok(!summary.content.includes("Closest call"));
+  assert.ok(summary.content.includes("Top damage: Aria with 30"));
+  const full = await shareEndCard(fightLog({ share: { shareMode: "fullVisibleRecap" } }));
+  assert.ok(full.content.includes("Biggest hit: Aria with 30"));
+  // Player reports off: nothing is shared.
+  settings.set(`${MODULE_ID}.${SETTINGS.ENABLE_PLAYER_SHARING}`, false);
+  posted.length = 0;
+  assert.equal(await shareEndCard(fightLog()), null);
+  assert.equal(posted.length, 0);
+  settings.set(`${MODULE_ID}.${SETTINGS.ENABLE_PLAYER_SHARING}`, true);
 });

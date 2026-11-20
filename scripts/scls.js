@@ -5,6 +5,7 @@ import { registerDebug } from "./debug.js";
 import { saveDebugFile } from "./debug-file.mjs";
 import { registerHubModule } from "./hub.mjs";
 import { canViewCombatLogs } from "./services/player-view-service.js";
+import { shareEndCard } from "./services/end-card-service.js";
 import { sessionTotals } from "./services/session-service.js";
 import { getSetting, registerSettings } from "./settings.js";
 import { noticeNewVersions, runSelfTest } from "./selftest.js";
@@ -128,6 +129,7 @@ function registerHooks() {
 // The button of the card at the end of a fight opens the full report of that fight.
 function wireEndCard(message, html) {
   const root = html?.[0] ?? html;
+  wireEndCardShare(message, root);
   const button = root?.querySelector?.(".scls-endcard__open");
   if (!button) return;
   // Without access to the log window the card still tells its numbers.
@@ -139,6 +141,47 @@ function wireEndCard(message, html) {
     event.preventDefault();
     countFeature(MODULE_ID, "endCardOpened");
     openCombatLog(button.dataset.sclsLogId || message?.getFlag?.(MODULE_ID, "endCard")?.logId || null);
+  });
+}
+
+// The GM's whispered card offers to post the same card for everyone. Once shared (stored on the card, so every GM
+// and every reload sees it) the button stays disabled. Only GMs see the card at all; players never get the button.
+function wireEndCardShare(message, root) {
+  const button = root?.querySelector?.(".scls-endcard__share");
+  if (!button) return;
+  if (!isGM() || getSetting(SETTINGS.ENABLE_PLAYER_SHARING, true) === false) {
+    button.remove();
+    return;
+  }
+  const markShared = () => {
+    button.disabled = true;
+    button.innerHTML = `<i class="fa-solid fa-share-nodes" inert></i> ${localize("SCLS.EndCard.Shared")}`;
+  };
+  if (message?.getFlag?.(MODULE_ID, "endCard")?.shared) {
+    markShared();
+    return;
+  }
+  button.addEventListener("click", async (event) => {
+    event.preventDefault();
+    if (button.disabled || !combatLogService) return;
+    button.disabled = true;
+    try {
+      const logId = button.dataset.sclsLogId || message?.getFlag?.(MODULE_ID, "endCard")?.logId;
+      const log = logId ? await combatLogService.getLog(logId) : null;
+      const posted = log ? await shareEndCard(log, { statsOptions: combatLogService.statsOptions() }) : null;
+      if (!posted) {
+        button.disabled = false;
+        ui.notifications.warn(localize("SCLS.Notification.EndCardShareOff"));
+        return;
+      }
+      countFeature(MODULE_ID, "endCardShared");
+      markShared();
+      await message?.setFlag?.(MODULE_ID, "endCard.shared", true);
+      ui.notifications.info(localize("SCLS.Notification.EndCardShared"));
+    } catch (error) {
+      button.disabled = false;
+      console.warn(`${MODULE_ID} | Could not share the end of combat card`, error);
+    }
   });
 }
 
@@ -168,7 +211,7 @@ Hooks.once("init", () => {
   registerSettings();
   registerDebug(() => combatLogService);
   registerUsage(MODULE_ID, {
-    features: ["endCardPosted", "endCardOpened", "offCombatLogged", "offCombatViewed", "combatLogged", "logCorrected", "sharingSaved", "reportPosted", "journalReport", "discordCopied", "logExported", "sessionShared", "selfTestRun"],
+    features: ["endCardPosted", "endCardOpened", "endCardShared", "offCombatLogged", "offCombatViewed", "combatLogged", "logCorrected", "sharingSaved", "reportPosted", "journalReport", "discordCopied", "logExported", "sessionShared", "selfTestRun"],
     settings: [SETTINGS.END_CARD_MODE, SETTINGS.OFF_COMBAT_LOG, SETTINGS.OFF_COMBAT_SCOPE, SETTINGS.DEFAULT_SHARE_MODE, SETTINGS.DEFAULT_DPR_METHOD, SETTINGS.PLAYER_STATS_ACCESS]
   });
   registerTemplateHelpers();

@@ -1406,7 +1406,14 @@ p.scls-share-status.is-shared {
   line-height: 1.35;
 }
 
-.scls-endcard .scls-endcard__open {
+.scls-endcard .scls-endcard__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.scls-endcard .scls-endcard__open,
+.scls-endcard .scls-endcard__share {
   width: auto;
   justify-self: start;
   margin: 0.15rem 0 0;

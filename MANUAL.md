@@ -105,13 +105,15 @@ The Corrections tab lists every hit point change the log could not explain. The 
 
 ## Summary card at the end of a fight
 
-When a tracked fight ends, a short card appears in the chat: how long it lasted, who did the most damage, critical hits and fumbles of the party, who went down, how many enemies were defeated and how much was healed. A button opens the full report of that fight in the log window. Lines without anything to say are left out, and a fight that lasted one round without anything happening gets no card.
+When a tracked fight ends, a short card appears in the chat: how long it lasted, who did the most damage, the biggest single hit (who, how much and with which action if known), critical hits and fumbles of the party, who went down, the closest call (a hero who went down and got back up, or stayed up with 35 percent of the maximum hit points or less, only where the maximum is known), how many enemies were defeated and how much was healed. A button opens the full report of that fight in the log window. Lines without anything to say are left out, and a fight that lasted one round without anything happening gets no card.
 
 *Summary card when a fight ends* picks who gets it:
 
 * **Whisper to the GM** (default): only the GMs see the card.
 * **Everyone:** the card goes to the whole table. It tells only what the player report of that fight would show: the sharing choices of the fight apply, hidden combatants and what they did stay out, enemies are only counted. While *Allow player reports* is off, the card goes to the GMs only.
 * **Off:** no card.
+
+**Share with players:** the GM card has a second button that posts the same card publicly in the chat. The shared card is built from the player view of that fight, like the card for everyone: the sharing choices of the fight apply (anonymized enemies, enemy numbers, hidden combatants and what they did stay out, whispered actions stay unnamed). Single hits and the closest call are action detail, so they appear only where the player report names single actions (*Full visible recap* and *Public report*). A fight that is still on *GM only* uses the same fallback as the card for everyone (the full recap with the module defaults for enemies). The card stores that it was shared, so the button stays disabled for every GM and after a reload, and it counts the feature `endCardShared`. While *Allow player reports* is off there is no button and nothing is shared. Players never get the button.
 
 The button works for everyone who may open the log window (*Players can view combat statistics*). Players get the read only window. The card is independent of *Post player report when combat ends*, which posts the long report. With both on, both appear.
 
@@ -218,7 +220,7 @@ The module can take part in a small usage report shared by all of Sephral’s mo
 With the GM’s consent only the active GM’s browser counts, and it sends at most one report a day. The counts are kept in a hidden world setting, so all browsers and computers of the GM count together, and turning the statistics off deletes them. A copy of a world gets its own world ID. The question lists everything the report contains, from the Foundry version to a random world ID. For Combat Log & Stats it holds:
 
 * on how many of the last 30 days the module was used
-* how often combats are logged, the card at the end of a fight is posted and opened, a game night gets its first entry outside combat and the entries outside combat are viewed, a log is corrected, sharing options are saved, reports are posted to the chat, written to a journal or copied for Discord, logs are exported and the self test runs
+* how often combats are logged, the card at the end of a fight is posted, opened and shared with the players, a game night gets its first entry outside combat and the entries outside combat are viewed, a log is corrected, sharing options are saved, reports are posted to the chat, written to a journal or copied for Discord, logs are exported and the self test runs
 * the settings *Summary card when a fight ends*, *Log outside combat*, *Outside combat: whose changes*, *Default report detail*, *Damage per round basis* and *Players can view combat statistics* (only the chosen option)
 * where errors occur in the module code: file, line, error type and whether the error arose in the module itself, in Foundry, in the game system or in another module, never the error message or the name of another module
 
