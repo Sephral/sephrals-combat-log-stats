@@ -9,6 +9,14 @@ export class GenericSystemAdapter {
     return ["system.attributes.hp.value", "system.attributes.hp.temp", "system.attributes.hp.tempmax", "system.attributes.hp.max"];
   }
 
+  // Current and maximum hit points of an actor for the danger bar: { hp, max, down }, null when the actor has none.
+  readVitals(actor) {
+    const hp = numberOrNull(getProperty(actor, "system.attributes.hp.value"));
+    const max = numberOrNull(getProperty(actor, "system.attributes.hp.max"));
+    if (hp === null || max === null || !(max > 0)) return null;
+    return { hp: Math.max(0, hp), max, down: hp <= 0 };
+  }
+
   snapshotResources(actor, resourcePaths = this.getResourcePaths()) {
     const resources = {};
     for (const path of resourcePaths) resources[path] = getProperty(actor, path);

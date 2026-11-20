@@ -6,6 +6,8 @@ import { fightSpan } from "./session-service.js";
 import { ACTION_DETAIL_MODES, formatNumber } from "./player-report-service.js";
 import { playerShareSettings, playerViewLog, SHAREABLE_MODES } from "./player-view-service.js";
 import { termKey } from "./system-terms.js";
+import { roundStories, storyHighlights } from "./round-story.js";
+import { countRoundStory } from "./story-usage.js";
 
 // The short card at the end of a fight: rounds, top damage, critical hits and fumbles, who went down, healing.
 // The numbers come from the computed log. For everyone they come from the player view of the log, so the card tells
@@ -77,7 +79,7 @@ export function endCardHighlights(events = [], participants = [], { maxHp = () =
  * @returns {{rounds: number, durationMs: number, top: {name: string, amount: number}|null, crits: number, fumbles: number,
  *   downed: string[], downedCount: number, defeated: number, healing: number, quiet: boolean}}
  */
-export function endCardData(computed = {}, { durationMs = 0, highlights = null } = {}) {
+export function endCardData(computed = {}, { durationMs = 0, highlights = null, story = [] } = {}) {
   const rows = (computed.byCombatant ?? []).filter((row) => row && row.side !== SIDES.HOSTILE);
   const summary = computed.summary ?? {};
   const damaging = rows.filter((row) => Number(row.damageAppliedNet) > 0)
@@ -99,7 +101,9 @@ export function endCardData(computed = {}, { durationMs = 0, highlights = null }
     defeated: Number(summary.enemiesDefeated) || 0,
     healing: Math.round(healing * 100) / 100,
     biggestHit: highlights?.biggestHit ?? null,
-    closeCall: highlights?.closeCall ?? null
+    closeCall: highlights?.closeCall ?? null,
+    // The most notable rounds as sentences (see round-story.js), empty when the card does not tell the course
+    story: Array.isArray(story) ? story : []
   };
   data.quiet = !data.top && !data.crits && !data.fumbles && !data.downedCount && !data.defeated && !data.healing;
   return data;
@@ -155,6 +159,10 @@ export function renderEndCardHtml(data, { title = "", logId = "", systemId = "",
     const text = escapeHtml(plural(outsideCount, "SCLS.EndCard.OutsideOne", "SCLS.EndCard.OutsideOther"));
     lines.push(`<li class="scls-endcard__outside"><button type="button" class="scls-endcard__outside-open" data-scls-log-id="${escapeHtml(logId)}" title="${escapeHtml(localize("SCLS.EndCard.OutsideOpen"))}">${text} <i class="fa-solid fa-arrow-up-right-from-square" inert></i></button></li>`);
   }
+  if (data.story?.length && !data.quiet) {
+    const rows = data.story.map((entry) => `<li>${escapeHtml(entry.text)}</li>`).join("");
+    lines.push(`<li class="scls-endcard__story"><strong>${escapeHtml(localize("SCLS.EndCard.Story"))}</strong><ul>${rows}</ul></li>`);
+  }
   const items = lines.join("");
   const heading = escapeHtml(title ? format("SCLS.EndCard.Title", { title }) : localize("SCLS.EndCard.TitlePlain"));
   const open = logId
@@ -179,7 +187,14 @@ export function buildEndCard(log, { statsOptions = {}, everyone = false } = {}) 
   const detail = !everyone || ACTION_DETAIL_MODES.has(share.shareMode);
   const maxOf = new Map((log.participants ?? []).map((entry) => [String(entry.combatantId ?? ""), Number(entry.finalResources?.["system.attributes.hp.max"])]));
   const highlights = detail ? endCardHighlights(source?.events ?? [], source?.participants ?? [], { maxHp: (id) => maxOf.get(id) ?? null }) : null;
-  return endCardData(source?.computed ?? {}, { durationMs: span?.durationMs ?? 0, highlights });
+  // The course of the fight: sentences by the same rules as the player view of this fight (single actions only where
+  // the share mode names them, enemy numbers only where they are shared).
+  let story = [];
+  if (getSetting(SETTINGS.ROUND_STORY, true) !== false && getSetting(SETTINGS.ROUND_STORY_CARD, true) !== false) {
+    story = storyHighlights(roundStories(source?.events ?? [], source?.participants ?? [], { detail, enemyAmounts: !everyone || share.enemyStats, seed: log.id }));
+    if (story.length) countRoundStory(log.id);
+  }
+  return endCardData(source?.computed ?? {}, { durationMs: span?.durationMs ?? 0, highlights, story });
 }
 
 function playersMayBeTold() {

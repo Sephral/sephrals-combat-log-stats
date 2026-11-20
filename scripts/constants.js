@@ -39,6 +39,11 @@ export const SETTINGS = Object.freeze({
   AUTO_POST_PLAYER_SUMMARY_ON_END: "autoPostPlayerSummaryOnEnd",
   AUTO_EXPORT_JOURNAL_ON_END: "autoExportJournalOnEnd",
   END_CARD_MODE: "endCardMode",
+  // One sentence per round in the Round Log, and as a section of the end card.
+  ROUND_STORY: "roundStory",
+  ROUND_STORY_CARD: "roundStoryCard",
+  // Client (GM): the danger bar on the combat tracker.
+  DANGER_BAR: "dangerBar",
   OFF_COMBAT_LOG: "offCombatLog",
   OFF_COMBAT_SCOPE: "offCombatScope",
   OFF_COMBAT_DATA: "offCombatData",

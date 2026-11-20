@@ -136,6 +136,35 @@ The choice is written to the sharing settings of that fight, as if it had been s
 
 The button works for everyone who may open the log window (*Players can view combat statistics*). Players get the read only window. The card is independent of *Post player report when combat ends*, which posts the long report. With both on, both appear.
 
+## One sentence per round
+
+The Round Log opens every round with one short sentence, for example *Round 2: Goblin Boss brings down Alda, but Brom answers with a critical hit for 18*, *Round 1: Goblin Boss strikes twice, nobody goes down* or in German *Runde 3: Brom streckt Goblin nieder*. There is no AI in it. The sentence is built from what the log recorded, by simple scores:
+
+| Event | Score |
+| --- | --- |
+| A hero goes down | 100 |
+| A takedown of an enemy | 80 |
+| A critical hit (with the damage of the best hit of that roller) | 60 |
+| A rescue: healing that brings a fallen hero back up | 55 |
+| Someone hits several times in one round | 25 plus 3 per hit |
+| The biggest remaining hit | 20 plus a share of its damage |
+
+The two best events of a round make the sentence, in the order they happened. When a hero goes down and another hero then lands a critical hit, a takedown or the best hit in the same round, the two are one connected sentence ("..., but Brom strikes back ..."). When only hits happened and nobody went down, the sentence says so. Every text has two or three wordings in English and German. The wording is picked from the id of the fight, so the same fight always reads the same. Undone actions, ignored events and combatants the log does not know stay out.
+
+Players see the sentences only in the Round Log, which they get only with the report detail *Full visible recap* or *Public report*. The sentences are built from the player view of the fight: hidden combatants and what they did stay out, anonymized enemies keep their numbers (Enemy 1 and so on), whispered actions stay unnamed, and without *Show enemy numbers* the damage of enemy hits is left out of the text.
+
+*Course of the fight on the summary card* adds a section "Verlauf" (*Course of the fight*) to the summary card at the end of a fight: the four most notable rounds, in round order. The card follows the same rules as the rest of the card: for everyone it is built from the player view, and with the report detail *Summary only* or *Party damage only* the card tells only who went down and who was defeated, without who did it, without damage and without critical hits.
+
+Two settings switch it (both world settings, both on by default): *One sentence per round* for the Round Log and the card, *Course of the fight on the summary card* for the card alone. The feature `roundStoryShown` counts once per fight and session, where the sentences show up first.
+
+## Danger bar
+
+During a fight the GM sees a small bar below the header of the combat tracker. It shows how close it is for the party, in three levels: calm (green), tense (amber) and critical (red). Point at it for the numbers, for example *Party at 38 % HP, one hero down, enemies at 70 %, round 3*.
+
+The score runs from 0 to 1: half of it is the hit points the player characters have lost (their current hit points together against their maximum together), 30 percent the share of heroes on the floor, 20 percent what is left of the opponents (hostile tokens, defeated ones count as 0 and a beaten opposing side caps the score at calm; unknown opponents count as half). From round 6 on a little is added while anybody is hurt. All heroes down is always critical. Tense starts at 0.4, critical at 0.65.
+
+Heroes are the player owned characters in the fight, opponents the hostile tokens. Hit points come from the system adapter: current and maximum hit points in D&D 5e, Pathfinder 2e and the generic adapter, health in Crucible (down is Weakened or Dead). A fight without hit points the module can read shows no bar. The bar is updated after hit point changes, defeats and turn changes, at most about six times per second, and drawn again with every render of the tracker. Only GMs get it, players never see it. *Danger bar (GM)* (a setting of your own browser, on by default) hides it. The feature `dangerShown` counts once per fight.
+
 ## Sharing
 
 Sharing is set per combat in the Sharing tab: report detail, report sections, enemy numbers, enemy names and hidden combatants. The GM can post the report to chat or create a journal entry that players can read. Stopping the share hides those journal entries from players again. Chat posts stay in the chat log until the GM deletes them. Reports never show GM notes, private rolls, unclear entries or the Corrections tab.
@@ -163,7 +192,7 @@ With *Players can view combat statistics* turned on (the default), players get t
 | Sessions | the sessions with the numbers of each fight as they see it there. Enemy numbers only appear when every fight of the selection shares them, otherwise the totals are the party's |
 | History | every recorded fight with its rounds, the combatants they may see, party damage and party damage per round. No delete button |
 | Summary | the key numbers and the awards, without the count of corrections and without the GM hints |
-| Round Log | the actions round by round, only when the report detail of the fight is *Full recap* or *Public report*. Open action cards and manual changes of the GM are left out, they only count in the numbers |
+| Round Log | the actions round by round, with the sentence of each round, only when the report detail of the fight is *Full recap* or *Public report*. Open action cards and manual changes of the GM are left out, they only count in the numbers |
 | Statistics | both charts, the discipline mix, the top actions and the side table |
 | Impact Meter | the ranking. Sorting changes only their own view |
 | Participants | the combatants with their side as plain text |
@@ -201,6 +230,9 @@ Excel with German regional settings expects semicolons in CSV files. Import the 
 | Resume active combats after reload | world | Continue running logs after a reload |
 | Open report when combat ends | you | Open the summary at the end of a combat |
 | Summary card when a fight ends | world | Short card in the chat: whisper to the GM (default), everyone or off |
+| One sentence per round | world | A sentence for every round in the Round Log and on the summary card, on by default |
+| Course of the fight on the summary card | world | The most notable rounds as a section of the card, on by default |
+| Danger bar (GM) | you | Danger bar on the combat tracker for the GM, on by default |
 | Log outside combat | world | Record hit point and condition changes, deaths and rests between the fights, on by default |
 | Outside combat: whose changes | world | Player characters only (default) or all actors |
 | Track conditions and effects | world | Record conditions and count control plays |

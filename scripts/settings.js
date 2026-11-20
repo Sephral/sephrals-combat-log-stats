@@ -9,6 +9,9 @@ const SETTING_DEFINITIONS = [
   [SETTINGS.SHOW_SUMMARY_ON_COMBAT_END, { scope: "client", config: true, type: Boolean, default: true }],
   // A short card in the chat when a fight ends, with a button to the full report.
   [SETTINGS.END_CARD_MODE, { scope: "world", config: true, type: String, choices: { [END_CARD_MODES.GM]: "SCLS.EndCardMode.gm", [END_CARD_MODES.EVERYONE]: "SCLS.EndCardMode.everyone", [END_CARD_MODES.OFF]: "SCLS.EndCardMode.off" }, default: END_CARD_MODES.GM }],
+  [SETTINGS.ROUND_STORY, { scope: "world", config: true, type: Boolean, default: true }],
+  [SETTINGS.ROUND_STORY_CARD, { scope: "world", config: true, type: Boolean, default: true }],
+  [SETTINGS.DANGER_BAR, { scope: "client", config: true, type: Boolean, default: true, onChange: () => globalThis.ui?.combat?.render?.() }],
   // Hit point and condition changes, deaths and rests between the fights, kept per game night.
   [SETTINGS.OFF_COMBAT_LOG, { scope: "world", config: true, type: Boolean, default: true }],
   [SETTINGS.OFF_COMBAT_SCOPE, { scope: "world", config: true, type: String, choices: { [OFF_COMBAT_SCOPES.PARTY]: "SCLS.OffCombatScope.party", [OFF_COMBAT_SCOPES.ALL]: "SCLS.OffCombatScope.all" }, default: OFF_COMBAT_SCOPES.PARTY }],

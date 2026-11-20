@@ -12,6 +12,7 @@ import { getSetting, registerSettings } from "./settings.js";
 import { noticeNewVersions, runSelfTest } from "./selftest.js";
 import { isGM, isTrackingGM, loadModuleTranslations, localize, registerTemplateHelpers } from "./utils.js";
 import { countFeature, markUsed, registerUsage } from "./usage.mjs";
+import { registerDangerBar } from "./danger-bar.js";
 
 let combatLogService = null;
 let combatLogApp = null;
@@ -136,6 +137,7 @@ function registerHooks() {
   });
 
   Hooks.on("renderCombatTracker", injectCombatTrackerButton);
+  registerDangerBar();
   Hooks.on("renderChatMessageHTML", wireEndCard);
 }
 
@@ -282,8 +284,8 @@ Hooks.once("init", () => {
   registerSettings();
   registerDebug(() => combatLogService);
   registerUsage(MODULE_ID, {
-    features: ["endCardPosted", "endCardOpened", "endCardShared", "endCardShareAsked", "offCombatOpened", "offCombatLogged", "offCombatViewed", "combatLogged", "logCorrected", "sharingSaved", "reportPosted", "journalReport", "discordCopied", "logExported", "sessionShared", "selfTestRun"],
-    settings: [SETTINGS.END_CARD_MODE, SETTINGS.OFF_COMBAT_LOG, SETTINGS.OFF_COMBAT_SCOPE, SETTINGS.DEFAULT_SHARE_MODE, SETTINGS.DEFAULT_DPR_METHOD, SETTINGS.PLAYER_STATS_ACCESS]
+    features: ["endCardPosted", "endCardOpened", "endCardShared", "endCardShareAsked", "offCombatOpened", "offCombatLogged", "offCombatViewed", "combatLogged", "logCorrected", "sharingSaved", "reportPosted", "journalReport", "discordCopied", "logExported", "sessionShared", "selfTestRun", "roundStoryShown", "dangerShown"],
+    settings: [SETTINGS.END_CARD_MODE, SETTINGS.OFF_COMBAT_LOG, SETTINGS.OFF_COMBAT_SCOPE, SETTINGS.DEFAULT_SHARE_MODE, SETTINGS.DEFAULT_DPR_METHOD, SETTINGS.PLAYER_STATS_ACCESS, SETTINGS.ROUND_STORY, SETTINGS.ROUND_STORY_CARD, SETTINGS.DANGER_BAR]
   });
   registerTemplateHelpers();
   registerHooks();

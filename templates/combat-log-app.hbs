@@ -435,6 +435,7 @@
               <strong>{{sclsLocalize "SCLS.Label.Round"}} {{this.round}}</strong>
               <span>{{this.summary}}</span>
             </summary>
+            {{#if this.story}}<p class="scls-round-story">{{this.story}}</p>{{/if}}
             <table class="scls-round-table">
               <thead><tr><th>{{sclsLocalize "SCLS.Label.Actor"}}</th><th>{{sclsLocalize "SCLS.Label.Action"}}</th><th>{{sclsLocalize "SCLS.Label.Target"}}</th><th>{{sclsLocalize "SCLS.Label.Amount"}}</th><th>{{sclsLocalize "SCLS.Label.Confidence"}}</th></tr></thead>
               <tbody>

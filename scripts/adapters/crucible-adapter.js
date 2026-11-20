@@ -36,6 +36,15 @@ const SPELL_TAGS = new Set(["spell", "composed", "iconicSpell"]);
 export class CrucibleSystemAdapter extends GenericSystemAdapter {
   id = "crucible";
 
+  // Health of an actor for the danger bar. Down is Weakened or Dead (state flags of the actor, else no health left).
+  readVitals(actor) {
+    const hp = numberOrNull(getProperty(actor, "system.resources.health.value"));
+    const max = numberOrNull(getProperty(actor, "system.resources.health.max"));
+    if (hp === null || max === null || !(max > 0)) return null;
+    const flagged = Boolean(actor?.system?.isWeakened || actor?.system?.isDead);
+    return { hp: Math.max(0, hp), max, down: flagged || hp <= 0 };
+  }
+
   getResourcePaths() {
     return Object.values(PATHS);
   }

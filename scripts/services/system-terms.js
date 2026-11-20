@@ -15,6 +15,7 @@ const CRUCIBLE_KEYS = new Set([
   "SCLS.Report.Heal.Self",
   "SCLS.Report.Aftermath.Down",
   "SCLS.Session.Report.Healing",
+  "SCLS.Danger.Party",
   "SCLS.EndCard.PartyDown",
   "SCLS.EndCard.Healing",
   "SCLS.EndCard.CloseBack",

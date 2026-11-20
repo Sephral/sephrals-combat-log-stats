@@ -12,6 +12,8 @@ import { combatantBarChart, roundDamageChart } from "./charts.js";
 import { NIGHT_PREFIX, allEvents, entriesSince } from "../services/offcombat-log.js";
 import { sessionPanel } from "./session-panel.js";
 import { countFeature } from "../usage.mjs";
+import { roundStories } from "../services/round-story.js";
+import { countRoundStory } from "../services/story-usage.js";
 import {
   actionKind, actionName, downState, eventAmount, isAutomaticEffect, isControl, isDamageApplied, isDamageDealt, isDowned,
   isHealingApplied, isMoraleEvent, isOpenAction, isResourceDelta, isSourceAttributed, sourceCombatantId, targetCombatantId
@@ -215,7 +217,8 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       netDamageLabel: damageLabel,
       netHealingLabel: healingLabel,
       summary: summaryContext(log),
-      combatRounds: combatRounds(log, { readOnly, enemyStats }),
+      // Players without the Round Log tab (report detail below the full recap) get no round data in the page either.
+      combatRounds: readOnly && share && !share.roundLog ? [] : combatRounds(log, { readOnly, enemyStats }),
       combatMetrics: combatMetrics(log, { enemyStats, damageLabel }),
       participants: participantRows(log),
       dprRows: sortedDprRows(log, this.dprSort),
@@ -889,6 +892,9 @@ function combatRounds(log, { readOnly = false, enemyStats = true } = {}) {
     if (event.type === EVENT_TYPES.ACTION_USED || MANUAL_TYPES.includes(event.type)) return false;
     return enemyStats || !(isHealingApplied(event) && participants.byCombatantId.get(targetCombatantId(event))?.side === SIDES.HOSTILE);
   };
+  // One sentence per round. A player view only holds what the player may see, so the same rules apply to the sentences.
+  const stories = new Map(getSetting(SETTINGS.ROUND_STORY, true) === false ? [] : roundStories(log.events ?? [], log.participants ?? [], { detail: true, enemyAmounts: enemyStats, seed: log.id }).map((entry) => [entry.round, entry.text]));
+  if (stories.size) countRoundStory(log.id);
   const roundNumbers = new Set((log.events ?? []).map((event) => Number(event.round) || 0).filter((round) => round > 0));
   const maxRound = Math.max(0, log.computed?.summary?.rounds ?? 0, ...roundNumbers);
   const rounds = [];
@@ -907,6 +913,7 @@ function combatRounds(log, { readOnly = false, enemyStats = true } = {}) {
       open: rounds.length === 0,
       actions,
       hasActions: actions.length > 0,
+      story: stories.get(round) ?? "",
       heroDamage,
       foeDamage,
       healing,
