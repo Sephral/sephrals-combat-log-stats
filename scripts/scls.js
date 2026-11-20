@@ -3,7 +3,7 @@ import { CombatLogApp } from "./apps/combat-log-app.js";
 import { CombatLogService } from "./services/combat-log-service.js";
 import { registerDebug } from "./debug.js";
 import { saveDebugFile } from "./debug-file.mjs";
-import { registerHubModule } from "./hub.mjs";
+import { partnerHint, registerHubModule } from "./hub.mjs";
 import { canViewCombatLogs } from "./services/player-view-service.js";
 import { needsShareChoice, shareChoiceHtml, shareEndCard } from "./services/end-card-service.js";
 import { PlayerReportService } from "./services/player-report-service.js";
@@ -144,6 +144,7 @@ function wireEndCard(message, html) {
   const root = html?.[0] ?? html;
   wireEndCardShare(message, root);
   wireEndCardOutside(message, root);
+  wireEndCardAlbumHint(root);
   const button = root?.querySelector?.(".scls-endcard__open");
   if (!button) return;
   // Without access to the log window the card still tells its numbers.
@@ -156,6 +157,15 @@ function wireEndCard(message, html) {
     countFeature(MODULE_ID, "endCardOpened");
     openCombatLog(button.dataset.sclsLogId || message?.getFlag?.(MODULE_ID, "endCard")?.logId || null);
   });
+}
+
+// GM cards only, and only while the Campaign Album is off: a small info icon beside the title. Added when the card
+// is drawn, never stored in the message, so it disappears as soon as the album is active.
+function wireEndCardAlbumHint(root) {
+  const title = root?.querySelector?.(".scls-endcard__title");
+  if (!title || !root.querySelector(".scls-endcard__share") || title.querySelector(".sephrals-partner-hint")) return;
+  const hint = partnerHint(MODULE_ID, "sephrals-campaign-album");
+  if (hint) title.insertAdjacentHTML("beforeend", hint);
 }
 
 // The line about the log outside of combat opens the Sessions tab at that block. GMs only, like the log itself.
