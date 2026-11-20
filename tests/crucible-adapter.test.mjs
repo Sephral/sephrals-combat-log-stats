@@ -30,7 +30,8 @@ class InitiativeCheck extends StandardCheck {}
 test("the registry picks the Crucible adapter for Crucible worlds", () => {
   assert.equal(getSystemAdapter("crucible").id, "crucible");
   assert.equal(getSystemAdapter("dnd5e").id, "dnd5e");
-  assert.equal(getSystemAdapter("pf2e").id, "generic");
+  assert.equal(getSystemAdapter("pf2e").id, "pf2e");
+  assert.equal(getSystemAdapter("swade").id, "generic");
 });
 
 test("health damage that overflows into wounds is one change of the health pool", () => {

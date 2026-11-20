@@ -321,3 +321,28 @@ test("an entry with an older time joins the night it belongs to, not the latest 
   assert.equal(state.nights.length, 2);
   assert.equal(state.nights[0].events.length, 2);
 });
+
+test("tonight's entries are counted from the latest night, and the unseen ones from the moment looked at", () => {
+  const state = log.emptyState();
+  log.appendEvent(state, hp(T0, "aria", -3));
+  log.appendEvent(state, hp(T0 + HOUR, "bram", -2));
+  assert.equal(log.tonightCount(state, { now: T0 + 2 * HOUR }), 2);
+  assert.equal(log.tonightCount(state, { now: T0 + 9 * HOUR }), 0, "an old night is not tonight");
+  assert.equal(log.tonightCount(log.emptyState()), 0);
+  const events = log.allEvents(state);
+  assert.equal(log.entriesSince(events, 0), 2);
+  assert.equal(log.entriesSince(events, T0), 1);
+  assert.equal(log.entriesSince(events, T0 + HOUR), 0);
+});
+
+test("the Sessions tab links to the block outside combat near its top, players and empty sessions get no link", () => {
+  const fightLog = { id: "a", title: "a", status: "ended", systemId: "dnd5e", startedAt: new Date(T0).toISOString(), endedAt: new Date(T0 + 600000).toISOString(), participants: [], events: [], computed: { summary: { rounds: 2 }, bySide: [], byCombatant: [], dpr: {} } };
+  assert.equal(sessionPanel([fightLog], { offEvents: [hp(T0 + HOUR, "aria", -5)] }).outsideLink, "Outside of fights: 1 entry, show");
+  assert.equal(sessionPanel([fightLog], { offEvents: [hp(T0 + HOUR, "aria", -5), hp(T0 + 2 * HOUR, "bram", -5)] }).outsideLink, "Outside of fights: 2 entries, show");
+  assert.equal(sessionPanel([fightLog], { offEvents: [] }).outsideLink, "");
+  assert.equal(sessionPanel([fightLog]).outsideLink, "");
+  for (const key of ["LinkOne", "LinkOther", "NewTitle"]) {
+    assert.ok(german[`SCLS.OffCombat.${key}`], key);
+    assert.ok(!/[;]| - | – /.test(german[`SCLS.OffCombat.${key}`] + english[`SCLS.OffCombat.${key}`]), key);
+  }
+});

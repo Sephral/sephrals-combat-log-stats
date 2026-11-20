@@ -810,3 +810,26 @@ test("players cannot save, delete or correct logs through the service", async ()
   assert.equal(log.events.length, 1);
   assert.equal(log.events[0].data.sourceCombatantId, undefined);
 });
+
+test("a system card that comes after the hit point change replaces the change, with its credit", () => {
+  const service = new CombatLogService();
+  const at = new Date().toISOString();
+  const log = {
+    participants: [{ combatantId: "hero", actorUuid: "Actor.h", name: "Hero" }, { combatantId: "orc", actorUuid: "Actor.o", name: "Orc" }],
+    events: [
+      { id: "d1", type: "resource.delta", createdAt: at, combatantId: "hero", data: { interpretedAs: "damage", delta: -6, resourcePath: "system.attributes.hp.value", targetCombatantId: "orc", sourceCombatantId: "hero", actionName: "Sword" } },
+      { id: "d2", type: "resource.delta", createdAt: at, combatantId: "hero", data: { interpretedAs: "damage", delta: -3, resourcePath: "system.attributes.hp.value", targetCombatantId: "orc" } }
+    ]
+  };
+  const applied = { id: "a1", type: "damage.applied", createdAt: at, combatantId: "", data: { amount: 6, targetCombatantId: "orc" } };
+  const merged = service.mergeEarlierDelta(log, applied);
+  assert.equal(merged.id, "d1");
+  assert.equal(merged.data.interpretedAs, "ignored");
+  assert.equal(merged.data.duplicateOfEventId, "a1");
+  assert.equal(applied.combatantId, "hero", "the card takes over who the change was credited to");
+  assert.equal(applied.data.actionName, "Sword");
+  assert.equal(log.events[1].data.interpretedAs, "damage", "another amount stays");
+  // Nothing matches: nothing is touched, also not a change of the other direction or target.
+  assert.equal(service.mergeEarlierDelta(log, { id: "a2", type: "healing.applied", createdAt: at, data: { amount: 3, targetCombatantId: "orc" } }), null);
+  assert.equal(service.mergeEarlierDelta(log, { id: "a3", type: "damage.applied", createdAt: at, data: { amount: 3, targetCombatantId: "hero" } }), null);
+});

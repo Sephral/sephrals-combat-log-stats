@@ -1,5 +1,5 @@
 import { CONFIDENCE, EVENT_TYPES, HOOKS, LOG_STATUS, MODULE_ID, OVERVIEW_TABS, RESOURCE_INTERPRETATIONS, SETTINGS, SHARE_MODES, SIDES, SOURCE_KINDS, TABS } from "../constants.js";
-import { getSetting } from "../settings.js";
+import { getSetting, setSetting } from "../settings.js";
 import { addSettingsGear, downloadData, escapeHtml, format, formatDateTime, formatDuration, isTrackingGM, localize, renderAppTemplate } from "../utils.js";
 import { CombatLogExportService } from "../services/export-service.js";
 import { canWriteCombatLogs, effectiveShareMode, playerHistoryEntry, playerShareSettings, playerTabs, playerViewLog, SHAREABLE_MODES } from "../services/player-view-service.js";
@@ -9,7 +9,7 @@ import { ALL_SESSIONS, groupSessions, renderSessionHtml, sessionDiscordMessages,
 import { CombatStatsService } from "../services/stats-service.js";
 import { isCrucibleLog, termKey } from "../services/system-terms.js";
 import { combatantBarChart, roundDamageChart } from "./charts.js";
-import { NIGHT_PREFIX, allEvents } from "../services/offcombat-log.js";
+import { NIGHT_PREFIX, allEvents, entriesSince } from "../services/offcombat-log.js";
 import { sessionPanel } from "./session-panel.js";
 import { countFeature } from "../usage.mjs";
 import {
@@ -41,6 +41,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       openLog: CombatLogApp.#onOpenLog,
       selectSession: CombatLogApp.#onSelectSession,
       sortDpr: CombatLogApp.#onSortDpr,
+      showOutside: CombatLogApp.#onShowOutside,
       postSessionReport: gmOnly(CombatLogApp.#onPostSessionReport),
       copySessionDiscord: gmOnly(CombatLogApp.#onCopySessionDiscord),
       ignoreEvent: gmOnly(CombatLogApp.#onIgnoreEvent),
@@ -98,10 +99,13 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     return !canWriteCombatLogs();
   }
 
-  showLog(logId = null) {
+  showLog(logId = null, { tab = null, outside = false } = {}) {
+    this.focusOutside = outside;
     if (logId) {
       this.logId = logId;
-      this.activeTab = "summary";
+      this.activeTab = tab ?? "summary";
+    } else if (tab) {
+      this.activeTab = tab;
     } else if (this.readOnly) {
       // The tool or button brings up the running fight, if there is one (see getStoredLog).
       this.preferRunning = true;
@@ -176,6 +180,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     const rows = await this.historyRowsFor(historyEntries, log?.id ?? "", readOnly);
     const historyDamageLabel = localize(readOnly ? "SCLS.Label.PartyNetDamage" : "SCLS.Label.NetDamage");
     const sessions = await this.sessionsFor(historyEntries, readOnly);
+    const badges = await this.tabBadges(readOnly);
     if (!log) {
       return {
         readOnly,
@@ -183,7 +188,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
         hasHistory: historyEntries.length > 0,
         activeTab: this.activeTab,
         tabs: visibleTabs(false, this.activeTab, tabIds),
-        tabNavigation: tabNavigation(false, this.activeTab, tabIds),
+        tabNavigation: tabNavigation(false, this.activeTab, tabIds, { badges }),
         historyRows: rows,
         historyDamageLabel,
         sessions
@@ -203,7 +208,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       computed,
       activeTab: this.activeTab,
       tabs: visibleTabs(true, this.activeTab, tabIds),
-      tabNavigation: tabNavigation(true, this.activeTab, tabIds),
+      tabNavigation: tabNavigation(true, this.activeTab, tabIds, { badges }),
       historyRows: rows,
       historyDamageLabel,
       sessions,
@@ -266,10 +271,20 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       this.offViewed = panel.selectedId;
       countFeature(MODULE_ID, "offCombatViewed");
     }
+    // Looking at the Sessions tab clears the badge.
+    if (off?.events?.length) void setSetting(SETTINGS.OFF_COMBAT_SEEN, Math.max(...off.events.map((event) => Number(event.t) || 0)));
     return {
       ...panel,
       sharingEnabled: getSetting(SETTINGS.ENABLE_PLAYER_SHARING, true) !== false
     };
+  }
+
+  // A quiet count on the Sessions tab: the entries outside combat the GM has not seen yet. GMs only.
+  async tabBadges(readOnly) {
+    if (readOnly || this.activeTab === "sessions") return {};
+    const off = await this.offCombatEvents();
+    const fresh = off ? entriesSince(off.events, getSetting(SETTINGS.OFF_COMBAT_SEEN, 0)) : 0;
+    return fresh > 0 ? { sessions: { count: fresh, title: format("SCLS.OffCombat.NewTitle", { count: fresh }) } } : {};
   }
 
   // The log outside fights, when it is on or holds entries.
@@ -328,6 +343,11 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     if (shareForm) {
       shareForm.addEventListener("change", () => this.renderReportPreview(shareForm));
       this.renderReportPreview(shareForm);
+    }
+    // Opened from the end card line: straight to the block outside combat.
+    if (this.focusOutside && this.activeTab === "sessions") {
+      this.focusOutside = false;
+      this.element.querySelector(".scls-between")?.scrollIntoView?.({ block: "start" });
     }
   }
 
@@ -426,6 +446,12 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     this.logId = target.dataset.logId;
     this.activeTab = "summary";
     await this.render();
+  }
+
+  // The line at the top of the Sessions tab takes the GM to the block outside combat further down.
+  static #onShowOutside() {
+    const block = this.element?.querySelector?.(".scls-between");
+    block?.scrollIntoView?.({ block: "start", behavior: "smooth" });
   }
 
   static async #onSelectSession(_event, target) {
@@ -805,8 +831,8 @@ function tabIcon(id) {
   }
 }
 
-function tabNavigation(hasLog, activeTab, tabIds = TABS) {
-  const tabs = visibleTabs(hasLog, activeTab, tabIds);
+function tabNavigation(hasLog, activeTab, tabIds = TABS, { badges = {} } = {}) {
+  const tabs = visibleTabs(hasLog, activeTab, tabIds).map((tab) => (badges[tab.id] ? { ...tab, badge: badges[tab.id].count, title: `${tab.label}. ${badges[tab.id].title}` } : tab));
   return {
     hasTabs: tabs.length > 0,
     overviewTabs: tabs.filter((tab) => OVERVIEW_TABS.includes(tab.id)),

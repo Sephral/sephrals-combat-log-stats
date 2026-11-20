@@ -12,7 +12,7 @@
   <nav class="scls-tabs">
     <div class="scls-tab-group scls-tab-group--history">
       {{#each tabNavigation.overviewTabs}}
-      <button type="button" class="{{#if this.active}}is-active{{/if}}" data-action="switchTab" data-tab="{{this.id}}" title="{{this.label}}"><i class="{{this.icon}}" aria-hidden="true"></i><span>{{this.label}}</span></button>
+      <button type="button" class="{{#if this.active}}is-active{{/if}}" data-action="switchTab" data-tab="{{this.id}}" title="{{#if this.title}}{{this.title}}{{else}}{{this.label}}{{/if}}"><i class="{{this.icon}}" aria-hidden="true"></i><span>{{this.label}}</span>{{#if this.badge}}<em class="scls-tab-badge">{{this.badge}}</em>{{/if}}</button>
       {{/each}}
     </div>
     {{#if tabNavigation.showConnector}}
@@ -22,7 +22,7 @@
     </div>
     <div class="scls-tab-group scls-tab-group--details">
       {{#each tabNavigation.detailTabs}}
-      <button type="button" class="{{#if this.active}}is-active{{/if}}" data-action="switchTab" data-tab="{{this.id}}" title="{{this.label}}"><i class="{{this.icon}}" aria-hidden="true"></i><span>{{this.label}}</span></button>
+      <button type="button" class="{{#if this.active}}is-active{{/if}}" data-action="switchTab" data-tab="{{this.id}}" title="{{#if this.title}}{{this.title}}{{else}}{{this.label}}{{/if}}"><i class="{{this.icon}}" aria-hidden="true"></i><span>{{this.label}}</span>{{#if this.badge}}<em class="scls-tab-badge">{{this.badge}}</em>{{/if}}</button>
       {{/each}}
     </div>
     {{/if}}
@@ -81,6 +81,7 @@
         {{/unless}}
       </div>
       <p class="scls-muted scls-session-range">{{sessions.rangeLabel}}</p>
+      {{#if sessions.outsideLink}}<p class="scls-session-outside"><button type="button" class="scls-link-button" data-action="showOutside"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i> {{sessions.outsideLink}}</button></p>{{/if}}
       {{#unless sessions.offOnly}}
       <div class="scls-grid scls-grid--cards">
         {{#each sessions.cards}}<div class="scls-metric{{#if this.tone}} scls-metric--{{this.tone}}{{/if}}"><span>{{this.label}}</span><strong>{{this.value}}</strong></div>{{/each}}

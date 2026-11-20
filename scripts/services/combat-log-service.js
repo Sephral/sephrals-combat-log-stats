@@ -13,6 +13,7 @@ import { countFeature } from "../usage.mjs";
 import { PlayerReportService } from "./player-report-service.js";
 import { postEndCard } from "./end-card-service.js";
 import { OffCombatService } from "./offcombat-service.js";
+import { tonightCount } from "./offcombat-log.js";
 
 // How long a system damage application (dnd5e.preApplyDamage) waits for the matching hit point update.
 const APPLICATION_WINDOW_MS = 5000;
@@ -153,12 +154,22 @@ export class CombatLogService {
   // The short card in the chat. A card that fails to post never costs the log.
   async runEndCard(log) {
     try {
-      const message = await postEndCard(log, { statsOptions: this.statsOptions() });
+      const message = await postEndCard(log, { statsOptions: this.statsOptions(), outside: await this.outsideTonight() });
       if (message) countFeature(MODULE_ID, "endCardPosted");
       return message;
     } catch (error) {
       console.warn(`${MODULE_ID} | Could not post the end of combat card`, error);
       return null;
+    }
+  }
+
+  // Entries of the log outside combat tonight, for the line on the end card. 0 when it is off or has nothing.
+  async outsideTonight() {
+    try {
+      if (!this.offCombat?.enabled) return 0;
+      return tonightCount(await this.offCombat.snapshotState());
+    } catch (error) {
+      return 0;
     }
   }
 
@@ -557,7 +568,44 @@ export class CombatLogService {
         }
       }));
     }
+    // Systems that post the card after the hit point change (pf2e: "Goblin takes 6 damage.") are met by the delta first.
+    for (const event of events) this.mergeEarlierDelta(log, event);
     return events;
+  }
+
+  // A hit point change that was already logged for the same target and amount is this application. The application stays
+  // (it names the target and the amount the system wrote), the change is marked as a duplicate of it, and the application
+  // takes over whom the change was credited to.
+  mergeEarlierDelta(log, applied) {
+    const healing = applied.type === EVENT_TYPES.HEALING_APPLIED;
+    const wanted = healing ? RESOURCE_INTERPRETATIONS.HEALING : RESOURCE_INTERPRETATIONS.DAMAGE;
+    const target = applied.data?.targetCombatantId;
+    const amount = Math.abs(Number(applied.data?.amount ?? 0)) || 0;
+    if (!target || !amount) return null;
+    const appliedTime = new Date(applied.createdAt).getTime();
+    const delta = [...(log.events ?? [])].reverse().find((event) => {
+      if (event.type !== EVENT_TYPES.RESOURCE_DELTA || event.ignored || event.data?.duplicateOfEventId) return false;
+      if (event.data?.interpretedAs !== wanted || event.data?.targetCombatantId !== target) return false;
+      if (!/hp\.value$|health\.value$/.test(String(event.data?.resourcePath ?? ""))) return false;
+      if (Math.abs(Number(event.data?.delta ?? 0)) !== amount) return false;
+      const time = new Date(event.createdAt).getTime();
+      return Number.isFinite(time) && Number.isFinite(appliedTime) && Math.abs(appliedTime - time) <= this.correlation.windowMs;
+    });
+    if (!delta) return null;
+    const sourceId = delta.data?.sourceCombatantId || (delta.combatantId && delta.combatantId !== target ? delta.combatantId : "");
+    const source = sourceId ? (log.participants ?? []).find((participant) => participant.combatantId === sourceId) : null;
+    if (source && !applied.combatantId) {
+      applied.combatantId = source.combatantId;
+      applied.actorUuid = source.actorUuid ?? "";
+      applied.tokenUuid = source.tokenUuid ?? "";
+      applied.data.actionName ||= delta.data?.actionName ?? "";
+      applied.data.actionKind ||= delta.data?.actionKind ?? "";
+    }
+    delta.confidence = CONFIDENCE.SAFE;
+    delta.data.interpretedAs = RESOURCE_INTERPRETATIONS.IGNORED;
+    delta.data.duplicateOfEventId = applied.id;
+    delta.data.notes = "Confirmed by the chat card of the system; counted from the card.";
+    return delta;
   }
 
   // Called from system hooks (dnd5e.preApplyDamage) right before the hit point update they cause.

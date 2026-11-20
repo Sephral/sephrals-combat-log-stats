@@ -34,6 +34,7 @@ const SETTING_DEFINITIONS = [
   [SETTINGS.RESOURCE_DELTA_WINDOW_MS, { scope: "world", config: false, type: Number, default: 60000 }],
   // Where the log outside fights lives: a pointer to its file, or the nights themselves when no file can be written.
   [SETTINGS.OFF_COMBAT_DATA, { scope: "world", config: false, type: Object, default: {} }],
+  [SETTINGS.OFF_COMBAT_SEEN, { scope: "client", config: false, type: Number, default: 0 }],
   [SETTINGS.RESOURCE_PATHS, { scope: "world", config: false, type: Object, default: DEFAULT_RESOURCE_PATHS }],
   [SETTINGS.ACKNOWLEDGED_VERSIONS, { scope: "client", config: false, type: String, default: "" }]
 ];

@@ -598,5 +598,18 @@
   "SCLS.OffCombat.Label.Regained": "Zurückgewonnen",
   "SCLS.OffCombat.Label.Downs": "Zu Boden",
   "SCLS.OffCombat.Label.Conditions": "Zustände",
-  "SCLS.OffCombat.Label.Rests": "Rasten"
+  "SCLS.OffCombat.Label.Rests": "Rasten",
+  "SCLS.EndCard.OutsideOne": "Heute Abend auch außerhalb von Kämpfen: 1 Eintrag",
+  "SCLS.EndCard.OutsideOther": "Heute Abend auch außerhalb von Kämpfen: {count} Einträge",
+  "SCLS.EndCard.OutsideOpen": "Das Protokoll außerhalb der Kämpfe öffnen",
+  "SCLS.EndCard.ChoiceTitle": "Kampf zeigen",
+  "SCLS.EndCard.ChoiceIntro": "Für diesen Kampf wurde noch nichts zum Teilen festgelegt. Was sollen die Spieler sehen?",
+  "SCLS.EndCard.ChoiceSummary": "Zusammenfassung zeigen",
+  "SCLS.EndCard.ChoiceSummaryHint": "Nur die Zeilen der Karte. Keine einzelnen Treffer, keine Details zu den Gegnern.",
+  "SCLS.EndCard.ChoiceRecap": "Ganzen Rückblick zeigen",
+  "SCLS.EndCard.ChoiceRecapHint": "Auch der größte Treffer und die knappste Situation. Spätere Berichte zu diesem Kampf zeigen den ganzen sichtbaren Rückblick.",
+  "SCLS.EndCard.ChoiceConfirm": "Zeigen",
+  "SCLS.OffCombat.NewTitle": "Neue Einträge außerhalb der Kämpfe: {count}",
+  "SCLS.OffCombat.LinkOne": "Außerhalb der Kämpfe: 1 Eintrag, anzeigen",
+  "SCLS.OffCombat.LinkOther": "Außerhalb der Kämpfe: {count} Einträge, anzeigen"
 }

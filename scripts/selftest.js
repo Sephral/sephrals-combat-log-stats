@@ -6,7 +6,7 @@ import { countFeature } from "./usage.mjs";
 // Self-test: checks what the module relies on in Foundry and the game system. Meant to be run after every update of
 // Foundry or the system; the GM also gets a notice once when a newer version than the verified one is installed.
 
-const SUPPORTED_SYSTEMS = ["dnd5e", "crucible"];
+const SUPPORTED_SYSTEMS = ["dnd5e", "crucible", "pf2e"];
 
 // A character a player owns, to read its resources.
 function playerCharacter() {

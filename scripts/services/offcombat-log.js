@@ -117,6 +117,22 @@ export function allEvents(state) {
 }
 
 /**
+ * How many entries tonight's game night has: the latest night, when it reaches up to gapMs before now. 0 otherwise.
+ * @param {object} state  A stored state (nights)
+ */
+export function tonightCount(state, { now = Date.now(), gapMs = SESSION_GAP_MS } = {}) {
+  const night = (state?.nights ?? []).at(-1);
+  if (!night || !Array.isArray(night.events) || now - Number(night.to) > gapMs) return 0;
+  return night.events.length;
+}
+
+/** How many of the events came after the moment seen (ms). */
+export function entriesSince(events = [], seen = 0) {
+  const from = Number(seen) || 0;
+  return events.reduce((total, event) => total + (Number(event?.t) > from ? 1 : 0), 0);
+}
+
+/**
  * Sorts events into the game sessions of the fights: an event belongs to the nearest session when it lies inside it or
  * less than gapMs outside. The rest is loose: nights without a fight.
  * @param {{id: string, startedAt: string, endedAt: string}[]} sessions  As groupSessions returns them

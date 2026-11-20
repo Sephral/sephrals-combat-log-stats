@@ -4,7 +4,7 @@ export const MODULE_TITLE = "Sephral’s Combat Log & Stats";
 export const PACKAGE_URL = "https://foundryvtt.com/packages/sephrals-combat-log-stats";
 export const SCHEMA_VERSION = 1;
 // The versions the module was verified against (see the self-test).
-export const TESTED_VERSIONS = Object.freeze({ core: "14.370", dnd5e: "6.1.0", crucible: "0.11.3" });
+export const TESTED_VERSIONS = Object.freeze({ core: "14.370", dnd5e: "6.1.0", crucible: "0.11.3", pf2e: "8.6.1" });
 
 export const HOOKS = Object.freeze({
   LOG_UPDATED: `${MODULE_ID}.logUpdated`,
@@ -42,6 +42,8 @@ export const SETTINGS = Object.freeze({
   OFF_COMBAT_LOG: "offCombatLog",
   OFF_COMBAT_SCOPE: "offCombatScope",
   OFF_COMBAT_DATA: "offCombatData",
+  // Client: the time of the newest entry outside combat this GM has looked at (the badge on the Sessions tab).
+  OFF_COMBAT_SEEN: "offCombatSeen",
   DISCORD_CREDIT: "discordCredit",
   RETENTION_DAYS: "retentionDays",
   RESOURCE_PATHS: "resourcePaths",

@@ -598,5 +598,18 @@
   "SCLS.OffCombat.Label.Regained": "Regained",
   "SCLS.OffCombat.Label.Downs": "Went down",
   "SCLS.OffCombat.Label.Conditions": "Conditions",
-  "SCLS.OffCombat.Label.Rests": "Rests"
+  "SCLS.OffCombat.Label.Rests": "Rests",
+  "SCLS.EndCard.OutsideOne": "Also tonight outside of fights: 1 entry",
+  "SCLS.EndCard.OutsideOther": "Also tonight outside of fights: {count} entries",
+  "SCLS.EndCard.OutsideOpen": "Open the log outside of fights",
+  "SCLS.EndCard.ChoiceTitle": "Share the fight",
+  "SCLS.EndCard.ChoiceIntro": "This fight was never set up for sharing. What should the players get to see?",
+  "SCLS.EndCard.ChoiceSummary": "Share a summary",
+  "SCLS.EndCard.ChoiceSummaryHint": "Only the lines of the card. No single hits, no enemy details.",
+  "SCLS.EndCard.ChoiceRecap": "Share the full recap",
+  "SCLS.EndCard.ChoiceRecapHint": "Also the biggest hit and the closest call. Later reports of this fight show the full visible recap.",
+  "SCLS.EndCard.ChoiceConfirm": "Share",
+  "SCLS.OffCombat.NewTitle": "New entries outside of fights: {count}",
+  "SCLS.OffCombat.LinkOne": "Outside of fights: 1 entry, show",
+  "SCLS.OffCombat.LinkOther": "Outside of fights: {count} entries, show"
 }

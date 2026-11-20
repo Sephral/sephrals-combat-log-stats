@@ -25,7 +25,9 @@ globalThis.ChatMessage = {
   }
 };
 
-const { endCardData, endCardHighlights, endCardLines, postEndCard, renderEndCardHtml, shareEndCard, worthACard } = await import("../scripts/services/end-card-service.js");
+const { applyShareChoice, endCardData, endCardHighlights, endCardLines, needsShareChoice, postEndCard, renderEndCardHtml, shareChoiceHtml, shareEndCard, worthACard } = await import("../scripts/services/end-card-service.js");
+const { playerShareSettings } = await import("../scripts/services/player-view-service.js");
+const { PlayerReportService } = await import("../scripts/services/player-report-service.js");
 const { CombatStatsService } = await import("../scripts/services/stats-service.js");
 
 const START = "2026-11-14T19:00:00.000Z";
@@ -247,4 +249,94 @@ test("sharing posts a public card from the player view: hidden combatants, enemy
   assert.equal(await shareEndCard(fightLog()), null);
   assert.equal(posted.length, 0);
   settings.set(`${MODULE_ID}.${SETTINGS.ENABLE_PLAYER_SHARING}`, true);
+});
+
+test("a fight on GM only asks what to share, any other detail shares directly", () => {
+  settings.set(`${MODULE_ID}.${SETTINGS.DEFAULT_SHARE_MODE}`, "gmOnly");
+  assert.equal(needsShareChoice(fightLog({ share: { shareMode: "gmOnly" } })), true);
+  assert.equal(needsShareChoice(fightLog()), true, "no saved detail and no default");
+  assert.equal(needsShareChoice(fightLog({ share: { shareMode: "summaryOnly" } })), false);
+  settings.set(`${MODULE_ID}.${SETTINGS.DEFAULT_SHARE_MODE}`, "fullVisibleDpr");
+  assert.equal(needsShareChoice(fightLog({ share: { shareMode: "gmOnly" } })), false, "the module default is a choice already");
+  settings.set(`${MODULE_ID}.${SETTINGS.DEFAULT_SHARE_MODE}`, "gmOnly");
+  const html = shareChoiceHtml();
+  assert.ok(/value="summary" checked/.test(html), "the summary is preselected");
+  assert.ok(html.includes("Share the full recap"));
+  for (const key of ["Intro", "Summary", "SummaryHint", "Recap", "RecapHint", "Confirm", "Title"]) {
+    assert.ok(german[`SCLS.EndCard.Choice${key}`] && english[`SCLS.EndCard.Choice${key}`], key);
+    assert.ok(!/[;]| - | – /.test(german[`SCLS.EndCard.Choice${key}`] + english[`SCLS.EndCard.Choice${key}`]), key);
+  }
+});
+
+test("the choice is saved with the fight: card, player view and reports agree, nothing more is opened", async () => {
+  settings.set(`${MODULE_ID}.${SETTINGS.ENABLE_PLAYER_SHARING}`, true);
+  settings.set(`${MODULE_ID}.${SETTINGS.DEFAULT_SHARE_MODE}`, "gmOnly");
+  const reports = new PlayerReportService();
+
+  const summaryLog = fightLog({ share: { shareMode: "gmOnly" } });
+  assert.equal(reports.canShare(summaryLog), false);
+  posted.length = 0;
+  const summary = await shareEndCard(summaryLog, { choice: "summary" });
+  assert.equal(summaryLog.shareSettings.shareMode, "summaryOnly");
+  assert.equal(summaryLog.shareSettings.isShared, true);
+  assert.equal(summaryLog.shareSettings.includeEnemyStats, false, "enemy numbers stay as the fight had them");
+  assert.equal(summaryLog.shareSettings.includeHiddenCombatants, false);
+  assert.equal(summaryLog.shareSettings.includePrivateRolls, false);
+  assert.equal(summaryLog.shareSettings.includeGMNotes, false);
+  assert.ok(summary.content.includes("Top damage: Aria with 30"));
+  assert.ok(!summary.content.includes("Biggest hit") && !summary.content.includes("Closest call"));
+  assert.equal(summary.flags[MODULE_ID].endCard.choice, "summary");
+  assert.equal(playerShareSettings(summaryLog).shareMode, "summaryOnly");
+  assert.equal(playerShareSettings(summaryLog).roundLog, false, "players get no single actions afterwards either");
+  assert.equal(reports.canShare(summaryLog), true);
+
+  const recapLog = fightLog({ hidden: true, share: { shareMode: "gmOnly" } });
+  const recap = await shareEndCard(recapLog, { choice: "recap" });
+  assert.equal(recapLog.shareSettings.shareMode, "fullVisibleRecap");
+  assert.ok(!recap.content.includes("Goblin Boss"), "hidden combatants stay out of the recap");
+  assert.equal(playerShareSettings(recapLog).enemyStats, false);
+
+  const visibleLog = fightLog({ share: { shareMode: "gmOnly" } });
+  assert.ok((await shareEndCard(visibleLog, { choice: "recap" })).content.includes("Biggest hit: Aria with 30"));
+
+  // An unknown choice shares nothing and changes nothing.
+  const untouched = fightLog({ share: { shareMode: "gmOnly" } });
+  posted.length = 0;
+  assert.equal(await shareEndCard(untouched, { choice: "everything" }), null);
+  assert.equal(posted.length, 0);
+  assert.equal(untouched.shareSettings.shareMode, "gmOnly");
+  assert.equal(applyShareChoice(null, "summary"), null);
+
+  // Without a choice a fight that has a detail keeps it.
+  const keeps = fightLog({ share: { shareMode: "partyDprOnly" } });
+  await shareEndCard(keeps);
+  assert.equal(keeps.shareSettings.shareMode, "partyDprOnly");
+  assert.equal(keeps.shareSettings.isShared, undefined);
+
+  // Player reports off: the choice is not written either.
+  settings.set(`${MODULE_ID}.${SETTINGS.ENABLE_PLAYER_SHARING}`, false);
+  const off = fightLog({ share: { shareMode: "gmOnly" } });
+  assert.equal(await shareEndCard(off, { choice: "summary" }), null);
+  assert.equal(off.shareSettings.shareMode, "gmOnly");
+  settings.set(`${MODULE_ID}.${SETTINGS.ENABLE_PLAYER_SHARING}`, true);
+});
+
+test("the GM card tells about the log outside of combat and opens it, the shared card does not", async () => {
+  settings.set(`${MODULE_ID}.${SETTINGS.ENABLE_PLAYER_SHARING}`, true);
+  posted.length = 0;
+  await postEndCard(fightLog(), { mode: END_CARD_MODES.GM, outside: 3 });
+  assert.ok(posted[0].content.includes("Also tonight outside of fights: 3 entries"));
+  assert.ok(posted[0].content.includes("scls-endcard__outside-open"));
+  await postEndCard(fightLog(), { mode: END_CARD_MODES.GM, outside: 1 });
+  assert.ok(posted[1].content.includes("Also tonight outside of fights: 1 entry "));
+  await postEndCard(fightLog(), { mode: END_CARD_MODES.GM, outside: 0 });
+  assert.ok(!posted[2].content.includes("outside of fights"));
+  await postEndCard(fightLog(), { mode: END_CARD_MODES.EVERYONE, outside: 4 });
+  assert.ok(!posted[3].content.includes("outside of fights"), "players do not hear about the GM log");
+  const shared = await shareEndCard(fightLog({ share: { shareMode: "summaryOnly" } }));
+  assert.ok(!shared.content.includes("outside of fights"));
+  for (const key of ["OutsideOne", "OutsideOther", "OutsideOpen"]) {
+    assert.ok(german[`SCLS.EndCard.${key}`], key);
+    assert.ok(!/[;]| - | – /.test(german[`SCLS.EndCard.${key}`] + english[`SCLS.EndCard.${key}`]), key);
+  }
 });

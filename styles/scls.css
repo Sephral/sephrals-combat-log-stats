@@ -1473,3 +1473,68 @@ p.scls-share-status.is-shared {
     display: none;
   }
 }
+
+/* The line on the GM's end card and the Sessions tab that lead to the log outside of fights. */
+.scls-endcard li .scls-endcard__outside-open,
+.scls-link-button {
+  display: inline;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: normal;
+  line-height: 1.35;
+  text-align: start;
+  text-transform: none;
+  text-decoration: underline dotted;
+  white-space: normal;
+  cursor: pointer;
+}
+
+.scls-endcard .scls-endcard__outside-open i {
+  margin-left: 0.2rem;
+  font-size: 0.8em;
+}
+
+.scls-session-outside {
+  margin: 0.25rem 0 0;
+}
+
+.scls-tabs .scls-tab-badge {
+  min-width: 1.15rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--scls-accent);
+  color: #fff;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1.15rem;
+  text-align: center;
+}
+
+.scls-share-choices {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.scls-share-choices p {
+  margin: 0;
+}
+
+.scls-share-choices .scls-share-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.scls-share-choices .scls-share-choice input {
+  margin-top: 0.25rem;
+}

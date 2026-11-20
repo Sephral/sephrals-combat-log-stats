@@ -5,7 +5,8 @@ import { registerDebug } from "./debug.js";
 import { saveDebugFile } from "./debug-file.mjs";
 import { registerHubModule } from "./hub.mjs";
 import { canViewCombatLogs } from "./services/player-view-service.js";
-import { shareEndCard } from "./services/end-card-service.js";
+import { needsShareChoice, shareChoiceHtml, shareEndCard } from "./services/end-card-service.js";
+import { PlayerReportService } from "./services/player-report-service.js";
 import { sessionTotals } from "./services/session-service.js";
 import { getSetting, registerSettings } from "./settings.js";
 import { noticeNewVersions, runSelfTest } from "./selftest.js";
@@ -17,7 +18,7 @@ let combatLogApp = null;
 const TOOL_NAME = "sclsCombatLog";
 
 // GMs always, players read only while the setting "Players can view combat statistics" is on.
-export function openCombatLog(logId = null) {
+export function openCombatLog(logId = null, { tab = null, outside = false } = {}) {
   if (!canViewCombatLogs()) {
     ui.notifications.warn(localize("SCLS.Notification.PlayerAccessOff"));
     return null;
@@ -26,11 +27,13 @@ export function openCombatLog(logId = null) {
   markUsed(MODULE_ID);
   // One window: reopening shows the requested log in the existing window.
   if (combatLogApp?.rendered) {
-    combatLogApp.showLog(logId);
+    combatLogApp.showLog(logId, { tab, outside });
     combatLogApp.bringToFront?.();
     return combatLogApp;
   }
   combatLogApp = new CombatLogApp(combatLogService, logId);
+  if (tab) combatLogApp.activeTab = tab;
+  combatLogApp.focusOutside = outside;
   void combatLogApp.render({ force: true });
   return combatLogApp;
 }
@@ -102,6 +105,16 @@ function registerHooks() {
   Hooks.on("updateActiveEffect", track((effect, changed) => combatLogService.activeEffectChanged(EVENT_TYPES.ACTIVE_EFFECT_UPDATED, effect, changed)));
   Hooks.on("deleteActiveEffect", track((effect) => combatLogService.activeEffectChanged(EVENT_TYPES.ACTIVE_EFFECT_DELETED, effect, {})));
 
+  // Pathfinder 2e keeps conditions as items on the actor, not as effects. They go through the same paths as effects.
+  const conditionItem = (handler) => (item) => {
+    if (globalThis.game?.system?.id !== "pf2e" || item?.type !== "condition") return;
+    handler(pf2eConditionAsEffect(item));
+  };
+  Hooks.on("createItem", offCombat((service, item) => conditionItem((effect) => service.effectChanged(effect, true))(item)));
+  Hooks.on("deleteItem", offCombat((service, item) => conditionItem((effect) => service.effectChanged(effect, false))(item)));
+  Hooks.on("createItem", track(conditionItem((effect) => combatLogService.activeEffectChanged(EVENT_TYPES.ACTIVE_EFFECT_CREATED, effect, {}))));
+  Hooks.on("deleteItem", track(conditionItem((effect) => combatLogService.activeEffectChanged(EVENT_TYPES.ACTIVE_EFFECT_DELETED, effect, {}))));
+
   Hooks.on("getSceneControlButtons", (controls) => {
     if (!canViewCombatLogs()) return;
     const tool = {
@@ -130,6 +143,7 @@ function registerHooks() {
 function wireEndCard(message, html) {
   const root = html?.[0] ?? html;
   wireEndCardShare(message, root);
+  wireEndCardOutside(message, root);
   const button = root?.querySelector?.(".scls-endcard__open");
   if (!button) return;
   // Without access to the log window the card still tells its numbers.
@@ -141,6 +155,36 @@ function wireEndCard(message, html) {
     event.preventDefault();
     countFeature(MODULE_ID, "endCardOpened");
     openCombatLog(button.dataset.sclsLogId || message?.getFlag?.(MODULE_ID, "endCard")?.logId || null);
+  });
+}
+
+// The line about the log outside of combat opens the Sessions tab at that block. GMs only, like the log itself.
+function wireEndCardOutside(message, root) {
+  const button = root?.querySelector?.(".scls-endcard__outside-open");
+  if (!button) return;
+  if (!isGM() || !canViewCombatLogs()) {
+    button.closest("li")?.remove();
+    return;
+  }
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    countFeature(MODULE_ID, "offCombatOpened");
+    openCombatLog(button.dataset.sclsLogId || message?.getFlag?.(MODULE_ID, "endCard")?.logId || null, { tab: "sessions", outside: true });
+  });
+}
+
+// A fight whose sharing was never chosen asks first: a summary or the full recap. Null when the GM cancels.
+async function askShareChoice() {
+  const dialog = foundry.applications.api.DialogV2;
+  countFeature(MODULE_ID, "endCardShareAsked");
+  return dialog.wait({
+    window: { title: localize("SCLS.EndCard.ChoiceTitle") },
+    content: shareChoiceHtml(),
+    rejectClose: false,
+    buttons: [
+      { action: "share", label: localize("SCLS.EndCard.ChoiceConfirm"), icon: "fa-solid fa-share-nodes", default: true, callback: (_event, button) => new FormData(button.form).get("choice") || "summary" },
+      { action: "cancel", label: localize("SCLS.Button.Cancel"), callback: () => null }
+    ]
   });
 }
 
@@ -168,7 +212,18 @@ function wireEndCardShare(message, root) {
     try {
       const logId = button.dataset.sclsLogId || message?.getFlag?.(MODULE_ID, "endCard")?.logId;
       const log = logId ? await combatLogService.getLog(logId) : null;
-      const posted = log ? await shareEndCard(log, { statsOptions: combatLogService.statsOptions() }) : null;
+      // Sharing was never set up for this fight: the GM chooses, and the choice is saved with the fight.
+      const asks = Boolean(log) && needsShareChoice(log);
+      const choice = asks ? await askShareChoice() : null;
+      if (asks && !choice) {
+        button.disabled = false;
+        return;
+      }
+      const posted = log ? await shareEndCard(log, { statsOptions: combatLogService.statsOptions(), choice }) : null;
+      if (posted && choice) {
+        new PlayerReportService().appendShareEvent(log, "created", { shareMode: log.shareSettings.shareMode, source: "endCard" });
+        await combatLogService.saveAndCompute(log, { immediate: true });
+      }
       if (!posted) {
         button.disabled = false;
         ui.notifications.warn(localize("SCLS.Notification.EndCardShareOff"));
@@ -183,6 +238,12 @@ function wireEndCardShare(message, root) {
       console.warn(`${MODULE_ID} | Could not share the end of combat card`, error);
     }
   });
+}
+
+// A pf2e condition item seen as an effect with a status: name, icon, the actor it sits on.
+export function pf2eConditionAsEffect(item) {
+  const slug = String(item?.slug ?? item?.system?.slug ?? "").trim();
+  return { id: item?.id ?? "", uuid: item?.uuid ?? "", name: item?.name ?? slug, img: item?.img ?? "", disabled: false, statuses: slug ? [slug] : [], parent: item?.parent };
 }
 
 function applyLanguageChange() {
@@ -211,7 +272,7 @@ Hooks.once("init", () => {
   registerSettings();
   registerDebug(() => combatLogService);
   registerUsage(MODULE_ID, {
-    features: ["endCardPosted", "endCardOpened", "endCardShared", "offCombatLogged", "offCombatViewed", "combatLogged", "logCorrected", "sharingSaved", "reportPosted", "journalReport", "discordCopied", "logExported", "sessionShared", "selfTestRun"],
+    features: ["endCardPosted", "endCardOpened", "endCardShared", "endCardShareAsked", "offCombatOpened", "offCombatLogged", "offCombatViewed", "combatLogged", "logCorrected", "sharingSaved", "reportPosted", "journalReport", "discordCopied", "logExported", "sessionShared", "selfTestRun"],
     settings: [SETTINGS.END_CARD_MODE, SETTINGS.OFF_COMBAT_LOG, SETTINGS.OFF_COMBAT_SCOPE, SETTINGS.DEFAULT_SHARE_MODE, SETTINGS.DEFAULT_DPR_METHOD, SETTINGS.PLAYER_STATS_ACCESS]
   });
   registerTemplateHelpers();

@@ -388,3 +388,47 @@ test("the window builds the Sessions tab only while it is open, for players from
     game.user.isGM = true;
   }
 });
+
+test("the Sessions tab carries a badge with the entries outside combat the GM has not seen, and looking clears it", async () => {
+  const stored = fight("a", "2026-10-24T19:00:00.000Z", { hits: [["aria", "goblin", 12]], hidden: false });
+  const t = new Date("2026-10-24T20:00:00.000Z").getTime();
+  const events = [{ t, k: "hp", i: "aria", n: "Aria", q: "hp", d: -4, v: 10, m: 20 }, { t: t + 1000, k: "rest", i: "aria", n: "Aria", r: "short", d: 0 }];
+  const seen = new Map();
+  const service = {
+    statsOptions: () => ({}),
+    listActiveLogs: () => [],
+    offCombat: { snapshotState: async () => ({ nights: [{ id: "n", from: t, to: t + 1000, dropped: 0, events }] }) },
+    persistence: {
+      loadLog: async () => structuredClone(stored),
+      loadActiveLogs: async () => [],
+      loadHistoryEntries: async () => [{ combatLogId: "a", title: stored.title, status: "ended", loaded: true }]
+    }
+  };
+  const originalGet = game.settings.get;
+  const originalSet = game.settings.set;
+  game.settings.get = (moduleId, key) => (key === "offCombatSeen" ? (seen.get(key) ?? 0) : originalGet(moduleId, key));
+  game.settings.set = async (moduleId, key, value) => {
+    if (key === "offCombatSeen") seen.set(key, value);
+    else if (originalSet) return originalSet(moduleId, key, value);
+    return value;
+  };
+  try {
+    const app = new CombatLogApp(service);
+    app.activeTab = "history";
+    const context = await app._prepareContext({});
+    const tab = context.tabNavigation.overviewTabs.find((entry) => entry.id === "sessions");
+    assert.equal(tab.badge, 2);
+    assert.match(tab.title, /New entries outside of fights: 2/);
+    app.activeTab = "sessions";
+    const open = await app._prepareContext({});
+    assert.ok(open.sessions.outsideLink);
+    assert.equal(open.tabNavigation.overviewTabs.find((entry) => entry.id === "sessions").badge, undefined, "no badge on the open tab");
+    assert.equal(seen.get("offCombatSeen"), t + 1000);
+    app.activeTab = "history";
+    const after = await app._prepareContext({});
+    assert.equal(after.tabNavigation.overviewTabs.find((entry) => entry.id === "sessions").badge, undefined);
+  } finally {
+    game.settings.get = originalGet;
+    game.settings.set = originalSet;
+  }
+});

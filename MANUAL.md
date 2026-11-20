@@ -26,6 +26,17 @@ Players can open the same window too, read only. See [What players see](#what-pl
 
 Healing without a known healer counts as healing received only. Damage nobody claimed counts as damage taken only, so it never inflates anybody's damage per round. The side totals still count it: damage an enemy took from an unknown source counts as damage the party dealt, damage a party member took counts for the enemies, and healing counts for the side of whoever was healed. That keeps the party and enemy numbers, the damage per round chart and the report recap in line with the net damage. The Summary tab says how many hits had no known attacker. Many of them point to an automation module the log does not know yet: save a debug log and report it.
 
+## Pathfinder 2e
+
+Pathfinder 2e has its own reading since this version. It works from what the system's chat cards say, in every language of the system:
+
+* **Rolls:** strikes and spell attacks are attack rolls, saving throws are saves, skill, perception and flat checks are checks, damage rolls and healing are read from the card. The action is named after the item behind the card (the weapon or the spell) and counts as melee, ranged or spell.
+* **Critical hits and fumbles** are the degrees of success of the system (critical success and critical failure of an attack). A natural 20 or 1 alone does not decide, as in the rules.
+* **Damage and healing:** what you apply with the buttons of a damage card (full, half, double, healing) is read from the "damage taken" card the system posts, with the target and the amount it really wrote. The change of hit points it caused is not counted a second time and is credited to whoever rolled the damage. A saving throw does not name a target, so the damage is not credited to the creature that saved.
+* **Conditions** (frightened, prone, dying and the others, which pf2e keeps as items) appear like effects in the log and in the log outside combat.
+
+Tested with pf2e 8.6.1 on Foundry 14 and pf2e 7.12.2 on Foundry 13.
+
 ## Crucible
 
 In Crucible worlds the log reads the four pools of a combatant instead of hit points.
@@ -95,6 +106,7 @@ The log outside combat records what happens to the party between the fights, so 
 * **What is recorded:** changes of hit points (in Crucible health, wounds, morale and madness), a character dropping to 0, conditions that are added or removed, deaths (the status dead or defeated) and rests. Statuses the game sets by itself, such as bloodied, concentrating or encumbered, are left out.
 * **Whose changes:** *Outside combat: whose changes* picks player characters only (default) or every actor of the world. Actors that take part in a running fight are left out: the log of that fight has them. After the fight they count again.
 * **Rests:** in D&D 5e a rest is one entry with the hit points regained. When the GM rests a character the entry says short or long rest, when a player rests on their own screen it says only that the character rested, because D&D 5e tells the kind of rest only to the screen that rested.
+* **Where it points you:** the GM card at the end of a fight ends with a line such as *Also tonight outside of fights: 4 entries* that opens the Sessions tab at the block (the line is only on the GM's whispered card, never on a card the players see). The Sessions tab button shows a small number badge with the entries you have not looked at yet, a line at the top of the Sessions tab (*Outside of fights: 4 entries, show*) scrolls to the block, and opening the tab clears the badge. What you have seen is remembered per GM and browser. Players see none of it.
 * **Where you see it:** in the Sessions tab, in the block *Outside combat* of the selected session, with cards for hit points lost and regained, characters down, conditions and rests, one row per character and the entries in time order. An entry belongs to the session it lies in or the nearest one less than 6 hours away. Entries without a fight within 6 hours make a game night of their own, listed in the session list as *no fight*, with only this block. With *All sessions* a column counts the entries per session and the nights without a fight are listed below.
 * **For the GM only:** players never get the block, the entries or the nights.
 * **Kept small:** changes of one character in the same direction within 30 seconds are one entry. A game night keeps at most 200 entries (the oldest go, the block says how many), the latest 20 nights are kept, and *History retention days* removes older nights too. An entry takes about 60 to 100 characters.
@@ -113,7 +125,14 @@ When a tracked fight ends, a short card appears in the chat: how long it lasted,
 * **Everyone:** the card goes to the whole table. It tells only what the player report of that fight would show: the sharing choices of the fight apply, hidden combatants and what they did stay out, enemies are only counted. While *Allow player reports* is off, the card goes to the GMs only.
 * **Off:** no card.
 
-**Share with players:** the GM card has a second button that posts the same card publicly in the chat. The shared card is built from the player view of that fight, like the card for everyone: the sharing choices of the fight apply (anonymized enemies, enemy numbers, hidden combatants and what they did stay out, whispered actions stay unnamed). Single hits and the closest call are action detail, so they appear only where the player report names single actions (*Full visible recap* and *Public report*). A fight that is still on *GM only* uses the same fallback as the card for everyone (the full recap with the module defaults for enemies). The card stores that it was shared, so the button stays disabled for every GM and after a reload, and it counts the feature `endCardShared`. While *Allow player reports* is off there is no button and nothing is shared. Players never get the button.
+**Share with players:** the GM card has a second button that posts the same card publicly in the chat. The shared card is built from the player view of that fight, like the card for everyone: the sharing choices of the fight apply (anonymized enemies, enemy numbers, hidden combatants and what they did stay out, whispered actions stay unnamed). Single hits and the closest call are action detail, so they appear only where the player report names single actions (*Full visible recap* and *Public report*). The card stores that it was shared, so the button stays disabled for every GM and after a reload, and it counts the feature `endCardShared`. While *Allow player reports* is off there is no button and nothing is shared. Players never get the button.
+
+**A fight nobody set up for sharing** (no report detail saved in its Sharing tab and *Default report detail* on *GM only*): the button first asks what the players get, with the summary preselected.
+
+* **Share a summary:** only the lines of the card. No single hits, no closest call, no enemy details.
+* **Share the full recap:** the card also names the biggest hit and the closest call.
+
+The choice is written to the sharing settings of that fight, as if it had been saved in the Sharing tab: the fight counts as shared, the report detail is *Summary only* or *Full visible recap*, and the player report, the players' view of the log window and the Sessions tab show what the card showed, nothing more. Enemy numbers, enemy names and hidden combatants keep what the fight had (by default no enemy numbers, anonymous enemies, no hidden combatants). Cancelling shares nothing and changes nothing. A fight with a report detail, saved or as the module default, shares directly with that detail and is not changed. The card for everyone (*Summary card when a fight ends*) is not asked and keeps using the module defaults for a fight on *GM only*.
 
 The button works for everyone who may open the log window (*Players can view combat statistics*). Players get the read only window. The card is independent of *Post player report when combat ends*, which posts the long report. With both on, both appear.
 
@@ -220,7 +239,7 @@ The module can take part in a small usage report shared by all of Sephral’s mo
 With the GM’s consent only the active GM’s browser counts, and it sends at most one report a day. The counts are kept in a hidden world setting, so all browsers and computers of the GM count together, and turning the statistics off deletes them. A copy of a world gets its own world ID. The question lists everything the report contains, from the Foundry version to a random world ID. For Combat Log & Stats it holds:
 
 * on how many of the last 30 days the module was used
-* how often combats are logged, the card at the end of a fight is posted, opened and shared with the players, a game night gets its first entry outside combat and the entries outside combat are viewed, a log is corrected, sharing options are saved, reports are posted to the chat, written to a journal or copied for Discord, logs are exported and the self test runs
+* how often combats are logged, the card at the end of a fight is posted, opened and shared with the players, a game night gets its first entry outside combat and the entries outside combat are viewed or opened from the end card, a sharing choice is asked for on the end card, a log is corrected, sharing options are saved, reports are posted to the chat, written to a journal or copied for Discord, logs are exported and the self test runs
 * the settings *Summary card when a fight ends*, *Log outside combat*, *Outside combat: whose changes*, *Default report detail*, *Damage per round basis* and *Players can view combat statistics* (only the chosen option)
 * where errors occur in the module code: file, line, error type and whether the error arose in the module itself, in Foundry, in the game system or in another module, never the error message or the name of another module
 

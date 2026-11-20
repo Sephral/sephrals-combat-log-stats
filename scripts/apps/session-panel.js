@@ -44,6 +44,8 @@ export function sessionPanel(logs = [], { selectedId = null, statsOptions = {}, 
     between: !all && offEvents ? betweenFightsPanel(off.bySession.get(selected.id) ?? [], { dropped: offDropped }) : null,
     nightRows: all ? nights.map((entry) => ({ id: entry.id, label: formatDateRange(entry.startedAt, entry.endedAt), count: formatNumber(entry.events.length) })) : [],
     showOutside: Boolean(offEvents),
+    // A line near the top for the block at the bottom: players never get it, nor does a session without entries.
+    outsideLink: !all && offEvents ? outsideLink(off.bySession.get(selected.id)) : "",
     enemyStats,
     showMorale: summary.morale,
     cards: summaryCards(summary),
@@ -151,6 +153,11 @@ function memberRow(member) {
     crits: formatNumber(member.crits),
     morale: formatNumber(member.moraleDamageDealt)
   };
+}
+
+function outsideLink(events) {
+  const count = events?.length ?? 0;
+  return count > 0 ? (count === 1 ? localize("SCLS.OffCombat.LinkOne") : format("SCLS.OffCombat.LinkOther", { count: formatNumber(count) })) : "";
 }
 
 function countLabel(key, count) {

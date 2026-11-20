@@ -1,10 +1,10 @@
-import { CONFIDENCE, END_CARD_MODES, MODULE_ID, RESOURCE_POOLS, SETTINGS, SIDES } from "../constants.js";
+import { CONFIDENCE, END_CARD_MODES, MODULE_ID, RESOURCE_POOLS, SETTINGS, SHARE_MODES, SIDES } from "../constants.js";
 import { getSetting } from "../settings.js";
 import { escapeHtml, format, formatDuration, localize } from "../utils.js";
 import { actionName, eventAmount, isDamageDealt, isDowned, isHealingApplied, isResourceDelta, isUndone, reversedCardMessageIds, sourceCombatantId, targetCombatantId } from "./event-insights.js";
 import { fightSpan } from "./session-service.js";
 import { ACTION_DETAIL_MODES, formatNumber } from "./player-report-service.js";
-import { playerShareSettings, playerViewLog } from "./player-view-service.js";
+import { playerShareSettings, playerViewLog, SHAREABLE_MODES } from "./player-view-service.js";
 import { termKey } from "./system-terms.js";
 
 // The short card at the end of a fight: rounds, top damage, critical hits and fumbles, who went down, healing.
@@ -147,8 +147,15 @@ export function endCardLines(data, systemId = "") {
  * The chat card: title, the lines and a button that opens the full report (wired in scls.js). The GM card also
  * offers to share it with the players.
  */
-export function renderEndCardHtml(data, { title = "", logId = "", systemId = "", shareable = false, shared = false } = {}) {
-  const items = endCardLines(data, systemId).map((line) => `<li>${escapeHtml(line)}</li>`).join("");
+export function renderEndCardHtml(data, { title = "", logId = "", systemId = "", shareable = false, shared = false, outside = 0 } = {}) {
+  const lines = endCardLines(data, systemId).map((line) => `<li>${escapeHtml(line)}</li>`);
+  // The log outside of combat is for the GM: only the whispered card tells about it, and opens it.
+  const outsideCount = shareable ? Math.max(0, Math.floor(Number(outside) || 0)) : 0;
+  if (outsideCount > 0) {
+    const text = escapeHtml(plural(outsideCount, "SCLS.EndCard.OutsideOne", "SCLS.EndCard.OutsideOther"));
+    lines.push(`<li class="scls-endcard__outside"><button type="button" class="scls-endcard__outside-open" data-scls-log-id="${escapeHtml(logId)}" title="${escapeHtml(localize("SCLS.EndCard.OutsideOpen"))}">${text} <i class="fa-solid fa-arrow-up-right-from-square" inert></i></button></li>`);
+  }
+  const items = lines.join("");
   const heading = escapeHtml(title ? format("SCLS.EndCard.Title", { title }) : localize("SCLS.EndCard.TitlePlain"));
   const open = logId
     ? `<button type="button" class="scls-endcard__open" data-scls-log-id="${escapeHtml(logId)}"><i class="fa-solid fa-chart-line" inert></i> ${escapeHtml(localize("SCLS.EndCard.Open"))}</button>`
@@ -187,9 +194,9 @@ function speaker() {
  * Posts the card for an ended fight. The audience follows the setting; "everyone" falls back to a GM whisper while
  * player reports are off. The GM card carries a button to share it. Returns the chat message, or null when no card is due.
  * @param {object} log        The ended combat log (with computed numbers)
- * @param {object} [options]  statsOptions for the player view
+ * @param {object} [options]  statsOptions for the player view; outside: entries of the log outside combat tonight (GM card only)
  */
-export async function postEndCard(log, { statsOptions = {}, mode = getSetting(SETTINGS.END_CARD_MODE, END_CARD_MODES.GM) } = {}) {
+export async function postEndCard(log, { statsOptions = {}, outside = 0, mode = getSetting(SETTINGS.END_CARD_MODE, END_CARD_MODES.GM) } = {}) {
   const ChatMessageClass = globalThis.ChatMessage;
   if (!log || mode === END_CARD_MODES.OFF || typeof ChatMessageClass?.create !== "function") return null;
   const everyone = mode === END_CARD_MODES.EVERYONE && playersMayBeTold();
@@ -197,26 +204,88 @@ export async function postEndCard(log, { statsOptions = {}, mode = getSetting(SE
   if (!worthACard(data)) return null;
   const whisper = everyone ? [] : (ChatMessageClass.getWhisperRecipients?.("GM") ?? []).map((user) => user.id);
   return ChatMessageClass.create({
-    content: renderEndCardHtml(data, { title: log.title, logId: log.id, systemId: log.systemId, shareable: !everyone }),
+    content: renderEndCardHtml(data, { title: log.title, logId: log.id, systemId: log.systemId, shareable: !everyone, outside }),
     speaker: speaker(),
     whisper,
     flags: { [MODULE_ID]: { endCard: { logId: log.id, audience: everyone ? "everyone" : "gm" } } }
   });
 }
 
+/** What the GM may share of a fight whose sharing was never chosen: a summary or the full recap. */
+export const SHARE_CHOICES = Object.freeze({ SUMMARY: "summary", RECAP: "recap" });
+const CHOICE_MODES = Object.freeze({ [SHARE_CHOICES.SUMMARY]: SHARE_MODES.SUMMARY_ONLY, [SHARE_CHOICES.RECAP]: SHARE_MODES.FULL_VISIBLE_RECAP });
+
+/**
+ * A fight that still is on "GM only" (no report detail saved and none as the module default) has no sharing choice
+ * the card could follow. The GM is asked what to share. Every other fight shares with the detail it already has.
+ */
+export function needsShareChoice(log) {
+  if (SHAREABLE_MODES.includes(log?.shareSettings?.shareMode)) return false;
+  return !SHAREABLE_MODES.includes(getSetting(SETTINGS.DEFAULT_SHARE_MODE));
+}
+
+/**
+ * Writes the GM's choice into the sharing settings of the fight, so the player view, the player reports and the cards
+ * of that fight tell what was shared and nothing more. Enemy numbers, enemy names and hidden combatants keep what the
+ * fight had (by default: no numbers, anonymous, no hidden ones). Changes the log, saving it is up to the caller.
+ * @returns {object|null} the new share settings, null for an unknown choice
+ */
+export function applyShareChoice(log, choice, now = new Date().toISOString()) {
+  const shareMode = CHOICE_MODES[choice];
+  if (!log || !shareMode) return null;
+  const share = log.shareSettings ?? {};
+  const anonymizeEnemies = typeof share.anonymizeEnemies === "boolean" ? share.anonymizeEnemies : getSetting(SETTINGS.DEFAULT_ANONYMIZE_ENEMIES, true) !== false;
+  log.shareSettings = {
+    ...share,
+    isShared: true,
+    shareMode,
+    includePartyStats: true,
+    includeEnemyStats: Boolean(share.includeEnemyStats),
+    anonymizeEnemies,
+    includeNpcNames: !anonymizeEnemies,
+    includeHiddenCombatants: Boolean(share.includeHiddenCombatants),
+    includePrivateRolls: false,
+    includeGMNotes: false,
+    includeUnclearEvents: false,
+    includeDPR: true,
+    includeTimeline: true,
+    includeCorrections: false,
+    allowPlayersToOpenReport: true,
+    shareStartedAt: share.shareStartedAt ?? now,
+    shareUpdatedAt: now
+  };
+  return log.shareSettings;
+}
+
+/** The two lines of the choice dialog: value, label key and hint key, the summary first (preselected). */
+export function shareChoiceOptions() {
+  return [
+    { value: SHARE_CHOICES.SUMMARY, label: "SCLS.EndCard.ChoiceSummary", hint: "SCLS.EndCard.ChoiceSummaryHint" },
+    { value: SHARE_CHOICES.RECAP, label: "SCLS.EndCard.ChoiceRecap", hint: "SCLS.EndCard.ChoiceRecapHint" }
+  ];
+}
+
+export function shareChoiceHtml() {
+  const rows = shareChoiceOptions().map((option, index) => `<label class="scls-share-choice"><input type="radio" name="choice" value="${option.value}"${index === 0 ? " checked" : ""}><span><strong>${escapeHtml(localize(option.label))}</strong><br><small>${escapeHtml(localize(option.hint))}</small></span></label>`).join("");
+  // A div: DialogV2 wraps the content in its own form, and a form inside a form is dropped by the browser.
+  return `<div class="scls-share-choices"><p>${escapeHtml(localize("SCLS.EndCard.ChoiceIntro"))}</p>${rows}</div>`;
+}
+
 /**
  * The GM shares a whispered card: the same card, public, with the numbers of the player view. Null while player
- * reports are off.
+ * reports are off. choice (summary or recap) is for a fight with no sharing chosen yet: it is written to the sharing
+ * settings of the log first (the caller saves the log), so the card and every later report of the fight agree.
  */
-export async function shareEndCard(log, { statsOptions = {} } = {}) {
+export async function shareEndCard(log, { statsOptions = {}, choice = null } = {}) {
   const ChatMessageClass = globalThis.ChatMessage;
   if (!log || !playersMayBeTold() || typeof ChatMessageClass?.create !== "function") return null;
+  if (choice && !applyShareChoice(log, choice)) return null;
   const data = buildEndCard(log, { statsOptions, everyone: true });
   return ChatMessageClass.create({
     content: renderEndCardHtml(data, { title: log.title, logId: log.id, systemId: log.systemId }),
     speaker: speaker(),
     whisper: [],
-    flags: { [MODULE_ID]: { endCard: { logId: log.id, audience: "everyone", sharedByGm: true } } }
+    flags: { [MODULE_ID]: { endCard: { logId: log.id, audience: "everyone", sharedByGm: true, ...(choice ? { choice } : {}) } } }
   });
 }
 
