@@ -4,13 +4,14 @@ import { addSettingsGear, downloadData, escapeHtml, format, formatDateTime, form
 import { CombatLogExportService } from "../services/export-service.js";
 import { canWriteCombatLogs, effectiveShareMode, playerHistoryEntry, playerShareSettings, playerTabs, playerViewLog, SHAREABLE_MODES } from "../services/player-view-service.js";
 import { discordCreditPreviewHtml, formatNumber, normalizeReportSections, PlayerReportService, REPORT_SECTIONS, reportSectionsWithContent, shareOptionAvailability } from "../services/player-report-service.js";
-import { awardDetail, awardLabel, computeAwards } from "../services/awards-service.js";
+import { awardCards } from "../services/awards-service.js";
 import { ALL_SESSIONS, groupSessions, renderSessionHtml, sessionDiscordMessages, sessionReport, sessionRows, sessionTitle, summarizeFights } from "../services/session-service.js";
 import { CombatStatsService } from "../services/stats-service.js";
 import { isCrucibleLog, termKey } from "../services/system-terms.js";
 import { combatantBarChart, roundDamageChart } from "./charts.js";
 import { NIGHT_PREFIX, allEvents, entriesSince } from "../services/offcombat-log.js";
 import { sessionPanel } from "./session-panel.js";
+import { canPostImage, runShareImage } from "../services/share-image-actions.js";
 import { countFeature } from "../usage.mjs";
 import { roundStories } from "../services/round-story.js";
 import { countRoundStory } from "../services/story-usage.js";
@@ -44,6 +45,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       selectSession: CombatLogApp.#onSelectSession,
       sortDpr: CombatLogApp.#onSortDpr,
       showOutside: CombatLogApp.#onShowOutside,
+      shareImage: CombatLogApp.#onShareImage,
       postSessionReport: gmOnly(CombatLogApp.#onPostSessionReport),
       copySessionDiscord: gmOnly(CombatLogApp.#onCopySessionDiscord),
       ignoreEvent: gmOnly(CombatLogApp.#onIgnoreEvent),
@@ -217,6 +219,7 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
       netDamageLabel: damageLabel,
       netHealingLabel: healingLabel,
       summary: summaryContext(log),
+      canPostImage: canPostImage(),
       // Players without the Round Log tab (report detail below the full recap) get no round data in the page either.
       combatRounds: readOnly && share && !share.roundLog ? [] : combatRounds(log, { readOnly, enemyStats }),
       combatMetrics: combatMetrics(log, { enemyStats, damageLabel }),
@@ -270,12 +273,13 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     // What happened outside the fights is for the GM.
     const off = readOnly ? null : await this.offCombatEvents();
     const panel = sessionPanel(logs, { selectedId: this.sessionId, statsOptions: this.statsOptions(), offEvents: off?.events ?? null, offDropped: off?.dropped ?? 0 });
-    if (panel.between?.has && this.offViewed !== panel.selectedId) {
+    // A sample window (sample-windows.js) counts nothing and leaves the badge alone.
+    if (panel.between?.has && this.offViewed !== panel.selectedId && !this.isSample) {
       this.offViewed = panel.selectedId;
       countFeature(MODULE_ID, "offCombatViewed");
     }
     // Looking at the Sessions tab clears the badge.
-    if (off?.events?.length) void setSetting(SETTINGS.OFF_COMBAT_SEEN, Math.max(...off.events.map((event) => Number(event.t) || 0)));
+    if (off?.events?.length && !this.isSample) void setSetting(SETTINGS.OFF_COMBAT_SEEN, Math.max(...off.events.map((event) => Number(event.t) || 0)));
     return {
       ...panel,
       sharingEnabled: getSetting(SETTINGS.ENABLE_PLAYER_SHARING, true) !== false
@@ -449,6 +453,17 @@ export class CombatLogApp extends foundry.applications.api.ApplicationV2 {
     this.logId = target.dataset.logId;
     this.activeTab = "summary";
     await this.render();
+  }
+
+  // Copy, save or post the fight as a picture. Players may too: it shows the player view of the fight.
+  static async #onShareImage(_event, target) {
+    if (target.disabled) return;
+    target.disabled = true;
+    try {
+      await runShareImage(target.dataset.kind, this.service, this.renderedLog?.id ?? this.logId);
+    } finally {
+      target.disabled = false;
+    }
   }
 
   // The line at the top of the Sessions tab takes the GM to the block outside combat further down.
@@ -1211,20 +1226,6 @@ function chartContext(log, { enemyStats = true } = {}) {
       { tone: "healing", label: localize("SCLS.Label.Healing") }
     ]
   };
-}
-
-// Award cards for the Summary tab. The GM sees every party member, hidden or not.
-function awardCards(log) {
-  const members = (log.participants ?? []).filter((participant) => participant.side === SIDES.FRIENDLY && participant.combatantId)
-    .map((participant) => ({ id: String(participant.combatantId), name: participant.name || "-" }));
-  const events = (log.events ?? []).filter((event) => !event.ignored);
-  return computeAwards({ members, rows: log.computed?.byCombatant ?? log.computed?.dpr?.byCombatant ?? [], events }).map((award) => ({
-    key: award.key,
-    icon: award.icon,
-    label: awardLabel(award.key),
-    names: award.winners.map((winner) => winner.name).join(", "),
-    detail: awardDetail(award)
-  }));
 }
 
 function sideRows(log) {

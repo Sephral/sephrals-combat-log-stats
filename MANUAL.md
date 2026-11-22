@@ -136,6 +136,18 @@ The choice is written to the sharing settings of that fight, as if it had been s
 
 The button works for everyone who may open the log window (*Players can view combat statistics*). Players get the read only window. The card is independent of *Post player report when combat ends*, which posts the long report. With both on, both appear.
 
+## Share a fight as a picture
+
+The summary card and the Summary tab of every fight have the buttons *Copy as image*, *Save as image* and *Post as image*. The picture is a PNG of the fight: its name, the day, rounds, time, enemies defeated and heroes down, the lines of the summary card (top damage, biggest hit, closest call, healing), the course of the fight in one sentence per round and the awards. It is drawn by the module itself, so it looks the same everywhere, in a light and a dark variant that follows the color theme of your Foundry (interface setting).
+
+**What the picture shows:** always the player view of the fight, never more, whoever clicks. The sharing choices of that fight apply: hidden combatants and what they did stay out, enemy numbers and enemy names only as the fight shares them, and single hits and the closest call only where the report detail names single actions. A fight that was never set up for sharing (no report detail saved and none as default) is drawn at summary level. Drawing the picture changes nothing about the fight.
+
+* **Copy as image** puts the picture on the clipboard, ready to paste into Discord or a message. The browser allows that only on a secure connection (https, or localhost). On a plain http address the picture is saved as a file instead and a note says why.
+* **Save as image** downloads the PNG, named after the fight and the day.
+* **Post as image** uploads the picture to `worlds/<world>/data/sephrals-combat-log-stats/images/` (on The Forge to the Assets Library) and posts it in the chat for everyone, so players can take it from there. It needs the permission to upload files and *Allow player reports*. Players without the permission do not get the button. Foundry cannot delete files from the browser, so every post leaves a file of a few hundred kilobytes in that folder, delete old ones in the file browser if you like.
+
+Players can copy and save the picture from the card and from the Summary tab too. The small line with the name of the module at the bottom is on by default and can be hidden with the world setting *Name on the fight picture*. The features `imageCopied`, `imageSaved` (also counted when a copy falls back to a download) and `imagePosted` are counted in the usage statistics, in the active GM’s browser only, so copies by players are not counted. The text on the picture exists in English and German, other languages get English.
+
 ## One sentence per round
 
 The Round Log opens every round with one short sentence, for example *Round 2: Goblin Boss brings down Alda, but Brom answers with a critical hit for 18*, *Round 1: Goblin Boss strikes twice, nobody goes down* or in German *Runde 3: Brom streckt Goblin nieder*. There is no AI in it. The sentence is built from what the log recorded, by simple scores:
@@ -229,6 +241,7 @@ Excel with German regional settings expects semicolons in CSV files. Import the 
 | Track combats automatically | world | Start a log for every combat |
 | Resume active combats after reload | world | Continue running logs after a reload |
 | Open report when combat ends | you | Open the summary at the end of a combat |
+| Name on the fight picture | world | Small line with the name of the module at the bottom of the picture of a fight (on by default) |
 | Summary card when a fight ends | world | Short card in the chat: whisper to the GM (default), everyone or off |
 | One sentence per round | world | A sentence for every round in the Round Log and on the summary card, on by default |
 | Course of the fight on the summary card | world | The most notable rounds as a section of the card, on by default |
@@ -271,8 +284,8 @@ The module can take part in a small usage report shared by all of Sephral’s mo
 With the GM’s consent only the active GM’s browser counts, and it sends at most one report a day. The counts are kept in a hidden world setting, so all browsers and computers of the GM count together, and turning the statistics off deletes them. A copy of a world gets its own world ID. The question lists everything the report contains, from the Foundry version to a random world ID. For Combat Log & Stats it holds:
 
 * on how many of the last 30 days the module was used
-* how often combats are logged, the card at the end of a fight is posted, opened and shared with the players, a game night gets its first entry outside combat and the entries outside combat are viewed or opened from the end card, a sharing choice is asked for on the end card, a log is corrected, sharing options are saved, reports are posted to the chat, written to a journal or copied for Discord, logs are exported and the self test runs
-* the settings *Summary card when a fight ends*, *Log outside combat*, *Outside combat: whose changes*, *Default report detail*, *Damage per round basis* and *Players can view combat statistics* (only the chosen option)
+* how often combats are logged, the card at the end of a fight is posted, opened and shared with the players, a game night gets its first entry outside combat and the entries outside combat are viewed or opened from the end card, a sharing choice is asked for on the end card, a fight is copied, saved or posted as a picture, a log is corrected, sharing options are saved, reports are posted to the chat, written to a journal or copied for Discord, logs are exported and the self test runs
+* the settings *Summary card when a fight ends*, *Log outside combat*, *Outside combat: whose changes*, *Name on the fight picture*, *Default report detail*, *Damage per round basis* and *Players can view combat statistics* (only the chosen option)
 * where errors occur in the module code: file, line, error type and whether the error arose in the module itself, in Foundry, in the game system or in another module, never the error message or the name of another module
 
 No names, chat messages, notes, dice results or other content of the world are sent.
@@ -297,6 +310,7 @@ Once the world is ready, `game.modules.get("sephrals-combat-log-stats").api` off
 | `sessionTotals({from, to})` | The combat totals of the game sessions in a time span, as players may see them (see below) |
 | `runSelfTest()` | Runs the self test (GM) |
 | `saveDebugFile(messageId)` | Saves the debug file, about one chat message or without an id about the latest ones (GM) |
+| `samples()` | The sample windows: every tab of the combat log window, the player view, the end cards, reports, copied texts, questions and the fight picture, filled with three made-up fights. Nothing in them is saved or counted. Sephral’s Translator lists them so translators see every text in its place |
 
 `sessionTotals` counts every game session that overlaps the span from `from` to `to` (each a date, an ISO string or milliseconds, `to` may be left out). When no session overlaps it, the nearest session less than 6 hours away counts, and without `from` the latest session. Each fight counts with its own sharing choices, exactly like *Post to Chat* in the Sessions tab, so the numbers are safe to show players. It returns `null` when there is no such session and while *Allow player reports* is off. A list of spans gets a list of answers, and the fights are read only once. Sephral’s Campaign Album uses it for the combat totals on its session pages.
 

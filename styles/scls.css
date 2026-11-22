@@ -1432,6 +1432,42 @@ p.scls-share-status.is-shared {
   padding: 0.2rem 0.7rem;
 }
 
+/* The fight as a picture: copy, save, post. */
+.scls-endcard .scls-endcard__images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.scls-endcard .scls-endcard__image {
+  width: auto;
+  margin: 0;
+  padding: 0.1rem 0.55rem;
+  font-size: var(--font-size-12, 0.75rem);
+  line-height: 1.5;
+}
+
+.scls-shareimage img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 0;
+  border-radius: 6px;
+}
+
+.scls-window .scls-share-image {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 0.6rem;
+}
+
+.scls-window .scls-share-image button {
+  width: auto;
+  margin: 0;
+  padding: 0.2rem 0.7rem;
+}
+
 /* Sessions tab: what happened outside the fights. */
 .scls-between {
   display: grid;

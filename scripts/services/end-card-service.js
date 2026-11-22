@@ -172,14 +172,22 @@ export function renderEndCardHtml(data, { title = "", logId = "", systemId = "",
     ? `<button type="button" class="scls-endcard__share" data-scls-log-id="${escapeHtml(logId)}"${shared ? " disabled" : ""}><i class="fa-solid fa-share-nodes" inert></i> ${escapeHtml(localize(shared ? "SCLS.EndCard.Shared" : "SCLS.EndCard.Share"))}</button>`
     : "";
   const buttons = open || share ? `<div class="scls-endcard__buttons">${open}${share}</div>` : "";
-  return `<div class="scls-endcard"><h3 class="scls-endcard__title">${heading}</h3><ul>${items}</ul>${buttons}</div>`;
+  return `<div class="scls-endcard"><h3 class="scls-endcard__title">${heading}</h3><ul>${items}</ul>${buttons}${logId ? shareImageButtonsHtml(logId) : ""}</div>`;
+}
+
+// Copy, save and post the fight as a picture (wired in scls.js). The picture follows the sharing choices of the fight,
+// whoever clicks: it never tells more than the card for everyone.
+export function shareImageButtonsHtml(logId) {
+  const id = escapeHtml(logId);
+  const button = (kind, icon, key) => `<button type="button" class="scls-endcard__image scls-endcard__image--${kind}" data-scls-image="${kind}" data-scls-log-id="${id}" title="${escapeHtml(localize(`${key}Hint`))}"><i class="fa-solid ${icon}" inert></i> ${escapeHtml(localize(key))}</button>`;
+  return `<div class="scls-endcard__images">${button("copy", "fa-copy", "SCLS.ShareImage.Copy")}${button("save", "fa-download", "SCLS.ShareImage.Save")}${button("post", "fa-image", "SCLS.ShareImage.Post")}</div>`;
 }
 
 /**
  * What the card tells, for the GM (the whole log) or for everyone (the player view of the log: the sharing choices of
  * that fight, nothing the player report would hide).
  */
-export function buildEndCard(log, { statsOptions = {}, everyone = false } = {}) {
+export function buildEndCard(log, { statsOptions = {}, everyone = false, countStory = true } = {}) {
   const share = everyone ? playerShareSettings(log) : null;
   const source = everyone ? playerViewLog(log, { statsOptions, share }) : log;
   const span = fightSpan(log);
@@ -192,7 +200,7 @@ export function buildEndCard(log, { statsOptions = {}, everyone = false } = {}) 
   let story = [];
   if (getSetting(SETTINGS.ROUND_STORY, true) !== false && getSetting(SETTINGS.ROUND_STORY_CARD, true) !== false) {
     story = storyHighlights(roundStories(source?.events ?? [], source?.participants ?? [], { detail, enemyAmounts: !everyone || share.enemyStats, seed: log.id }));
-    if (story.length) countRoundStory(log.id);
+    if (story.length && countStory) countRoundStory(log.id);
   }
   return endCardData(source?.computed ?? {}, { durationMs: span?.durationMs ?? 0, highlights, story });
 }

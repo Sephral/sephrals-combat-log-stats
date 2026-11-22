@@ -236,6 +236,11 @@
 
     <section class="scls-panel" data-panel="summary">
       <h3>{{sclsLocalize "SCLS.Tab.summary"}}</h3>
+      <div class="scls-share-image" role="group" aria-label="{{sclsLocalize "SCLS.ShareImage.Group"}}">
+        <button type="button" data-action="shareImage" data-kind="copy" title="{{sclsLocalize "SCLS.ShareImage.CopyHint"}}"><i class="fa-solid fa-copy" inert></i> {{sclsLocalize "SCLS.ShareImage.Copy"}}</button>
+        <button type="button" data-action="shareImage" data-kind="save" title="{{sclsLocalize "SCLS.ShareImage.SaveHint"}}"><i class="fa-solid fa-download" inert></i> {{sclsLocalize "SCLS.ShareImage.Save"}}</button>
+        {{#if canPostImage}}<button type="button" data-action="shareImage" data-kind="post" title="{{sclsLocalize "SCLS.ShareImage.PostHint"}}"><i class="fa-solid fa-image" inert></i> {{sclsLocalize "SCLS.ShareImage.Post"}}</button>{{/if}}
+      </div>
       <div class="scls-grid scls-grid--cards">
         <div class="scls-metric"><span>{{sclsLocalize "SCLS.Label.Started"}}</span><strong>{{summary.startedAt}}</strong></div>
         <div class="scls-metric"><span>{{sclsLocalize "SCLS.Label.Ended"}}</span><strong>{{summary.endedAt}}</strong></div>

@@ -6,7 +6,8 @@ const counted = new Set();
 
 export function countRoundStory(logId) {
   const key = String(logId ?? "");
-  if (!key || counted.has(key)) return;
+  // The fights of the sample windows count nothing.
+  if (!key || key.startsWith("scls-sample") || counted.has(key)) return;
   counted.add(key);
   countFeature(MODULE_ID, "roundStoryShown");
 }

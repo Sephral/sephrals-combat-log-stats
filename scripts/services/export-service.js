@@ -201,4 +201,6 @@ function labelFor(prefix, value) {
   return label === key ? String(value ?? "") : label;
 }
 
+export { renderMarkdownExport };
+
 export const __test__ = { renderMarkdownExport, actionLines, renderCsvExport, csvCell };

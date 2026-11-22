@@ -6,6 +6,7 @@ import { saveDebugFile } from "./debug-file.mjs";
 import { partnerHint, registerHubModule } from "./hub.mjs";
 import { canViewCombatLogs } from "./services/player-view-service.js";
 import { needsShareChoice, shareChoiceHtml, shareEndCard } from "./services/end-card-service.js";
+import { canPostImage, runShareImage } from "./services/share-image-actions.js";
 import { PlayerReportService } from "./services/player-report-service.js";
 import { sessionTotals } from "./services/session-service.js";
 import { getSetting, registerSettings } from "./settings.js";
@@ -13,6 +14,7 @@ import { noticeNewVersions, runSelfTest } from "./selftest.js";
 import { isGM, isTrackingGM, loadModuleTranslations, localize, registerTemplateHelpers } from "./utils.js";
 import { countFeature, markUsed, registerUsage } from "./usage.mjs";
 import { registerDangerBar } from "./danger-bar.js";
+import { sampleWindows } from "./sample-windows.js";
 
 let combatLogService = null;
 let combatLogApp = null;
@@ -147,6 +149,7 @@ function wireEndCard(message, html) {
   wireEndCardShare(message, root);
   wireEndCardOutside(message, root);
   wireEndCardAlbumHint(root);
+  wireEndCardImages(message, root);
   const button = root?.querySelector?.(".scls-endcard__open");
   if (!button) return;
   // Without access to the log window the card still tells its numbers.
@@ -159,6 +162,29 @@ function wireEndCard(message, html) {
     countFeature(MODULE_ID, "endCardOpened");
     openCombatLog(button.dataset.sclsLogId || message?.getFlag?.(MODULE_ID, "endCard")?.logId || null);
   });
+}
+
+// Copy, save and post the fight as a picture. Everyone with the card may copy or save it (the picture tells what the
+// card for everyone tells). Posting needs the right to upload files.
+function wireEndCardImages(message, root) {
+  const buttons = root?.querySelectorAll?.(".scls-endcard__image");
+  if (!buttons?.length) return;
+  for (const button of buttons) {
+    if (button.dataset.sclsImage === "post" && !canPostImage()) {
+      button.remove();
+      continue;
+    }
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      if (button.disabled) return;
+      button.disabled = true;
+      try {
+        await runShareImage(button.dataset.sclsImage, combatLogService, button.dataset.sclsLogId || message?.getFlag?.(MODULE_ID, "endCard")?.logId);
+      } finally {
+        button.disabled = false;
+      }
+    });
+  }
 }
 
 // GM cards only, and only while the Campaign Album is off: a small info icon beside the title. Added when the card
@@ -284,8 +310,8 @@ Hooks.once("init", () => {
   registerSettings();
   registerDebug(() => combatLogService);
   registerUsage(MODULE_ID, {
-    features: ["endCardPosted", "endCardOpened", "endCardShared", "endCardShareAsked", "offCombatOpened", "offCombatLogged", "offCombatViewed", "combatLogged", "logCorrected", "sharingSaved", "reportPosted", "journalReport", "discordCopied", "logExported", "sessionShared", "selfTestRun", "roundStoryShown", "dangerShown"],
-    settings: [SETTINGS.END_CARD_MODE, SETTINGS.OFF_COMBAT_LOG, SETTINGS.OFF_COMBAT_SCOPE, SETTINGS.DEFAULT_SHARE_MODE, SETTINGS.DEFAULT_DPR_METHOD, SETTINGS.PLAYER_STATS_ACCESS, SETTINGS.ROUND_STORY, SETTINGS.ROUND_STORY_CARD, SETTINGS.DANGER_BAR]
+    features: ["endCardPosted", "endCardOpened", "endCardShared", "endCardShareAsked", "offCombatOpened", "offCombatLogged", "offCombatViewed", "combatLogged", "logCorrected", "sharingSaved", "reportPosted", "journalReport", "discordCopied", "logExported", "sessionShared", "selfTestRun", "roundStoryShown", "dangerShown", "imageCopied", "imageSaved", "imagePosted"],
+    settings: [SETTINGS.END_CARD_MODE, SETTINGS.OFF_COMBAT_LOG, SETTINGS.OFF_COMBAT_SCOPE, SETTINGS.DEFAULT_SHARE_MODE, SETTINGS.DEFAULT_DPR_METHOD, SETTINGS.PLAYER_STATS_ACCESS, SETTINGS.ROUND_STORY, SETTINGS.ROUND_STORY_CARD, SETTINGS.DANGER_BAR, SETTINGS.SHARE_IMAGE_CREDIT]
   });
   registerTemplateHelpers();
   registerHooks();
@@ -338,6 +364,8 @@ Hooks.once("ready", async () => {
     runSelfTest: (options) => runSelfTest(combatLogService, options),
     // Combat totals of the game sessions in a time span, as players may see them (other modules, e.g. Campaign Album)
     sessionTotals: (spans) => sessionTotals(combatLogService, spans),
+    // The windows and chat cards filled with made-up fights, nothing saved (translators, testing; see samples.mjs)
+    samples: () => sampleWindows(combatLogService),
     // One file for all of Sephral's modules, without a message id about their latest picture
     saveDebugFile: (messageId) => saveDebugFile(messageId ?? null, { moduleId: MODULE_ID })
   };

@@ -27,6 +27,8 @@ const SETTING_DEFINITIONS = [
   [SETTINGS.AUTO_EXPORT_JOURNAL_ON_END, { scope: "world", config: true, type: Boolean, default: false }],
   // The last line of a report copied for Discord links to the package page.
   [SETTINGS.DISCORD_CREDIT, { scope: "world", config: true, type: Boolean, default: true }],
+  // The picture of a fight names the module in a small footer line.
+  [SETTINGS.SHARE_IMAGE_CREDIT, { scope: "world", config: true, type: Boolean, default: true }],
   [SETTINGS.RETENTION_DAYS, { scope: "world", config: true, type: Number, default: 0 }],
   [SETTINGS.DEBUG_MODE, { scope: "client", config: true, type: Boolean, default: false }],
   // Internal or advanced values without a place in the settings dialog.

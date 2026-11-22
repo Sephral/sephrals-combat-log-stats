@@ -268,7 +268,7 @@ test("every action that changes, hands out or exports a log refuses players", as
     persistence: { loadLog: record("loadLog"), loadActiveLogs: async () => [] }
   };
   const app = new CombatLogApp(service, "log-1");
-  const readOnlyActions = ["switchTab", "openLog", "selectSession", "sortDpr", "showOutside"];
+  const readOnlyActions = ["switchTab", "openLog", "selectSession", "sortDpr", "showOutside", "shareImage"];
   const actions = Object.entries(CombatLogApp.DEFAULT_OPTIONS.actions).filter(([name]) => !readOnlyActions.includes(name));
   assert.deepEqual(actions.map(([name]) => name).sort(), [
     "addAdjustment", "copyDiscordReport", "copySessionDiscord", "createJournalReport", "deleteLog", "exportCsv", "exportDebug", "exportJson",

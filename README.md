@@ -11,7 +11,7 @@
 ## Highlights
 
 * **Records itself:** start a combat as usual and the log runs in the background, round by round. A reload does not stop it.
-* **A summary when the fight ends:** a short card in the chat names the biggest hit and the closest call, tells the fight in one sentence per round and has a button to the full report. Whispered to you by default, and you can share it with the players as a summary or the full recap.
+* **A summary when the fight ends:** a short card in the chat names the biggest hit and the closest call, tells the fight in one sentence per round and has a button to the full report. Whispered to you by default, and you can share it with the players as a summary or the full recap. One click copies the fight as a picture for Discord, saves it or posts it in the chat.
 * **A danger bar for you:** during the fight the combat tracker shows the GM heroes against opponents by hit points at a glance.
 * **A log outside combat too:** hit point and condition changes, deaths and rests between the fights, kept per game night so you see what happened since the last fight.
 * **Every number that matters:** damage dealt and taken, healing, takedowns, times downed, critical hits, fumbles, control plays and damage per round for every combatant.

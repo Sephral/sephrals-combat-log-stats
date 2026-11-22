@@ -1,3 +1,4 @@
+import { SIDES } from "../constants.js";
 import { activeLocale, format, localize } from "../utils.js";
 import { isCritical, isFumble, isUndone, naturalRollShare, rescueIncidents, reversedCardMessageIds } from "./event-insights.js";
 
@@ -115,6 +116,21 @@ function rollSummary(events, ids) {
     summary.set(id, entry);
   }
   return summary;
+}
+
+// The awards of a log (or of its player view) as cards: party members only, hidden ones too when the log has them.
+// Used by the Summary tab and by the picture of a fight.
+export function awardCards(log) {
+  const members = (log?.participants ?? []).filter((participant) => participant.side === SIDES.FRIENDLY && participant.combatantId)
+    .map((participant) => ({ id: String(participant.combatantId), name: participant.name || "-" }));
+  const events = (log?.events ?? []).filter((event) => !event.ignored);
+  return computeAwards({ members, rows: log?.computed?.byCombatant ?? log?.computed?.dpr?.byCombatant ?? [], events }).map((award) => ({
+    key: award.key,
+    icon: award.icon,
+    label: awardLabel(award.key),
+    names: award.winners.map((winner) => winner.name).join(", "),
+    detail: awardDetail(award)
+  }));
 }
 
 function negate(value) {

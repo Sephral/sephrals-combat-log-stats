@@ -50,6 +50,8 @@ export const SETTINGS = Object.freeze({
   // Client: the time of the newest entry outside combat this GM has looked at (the badge on the Sessions tab).
   OFF_COMBAT_SEEN: "offCombatSeen",
   DISCORD_CREDIT: "discordCredit",
+  // The footer line on the picture of a fight.
+  SHARE_IMAGE_CREDIT: "shareImageCredit",
   RETENTION_DAYS: "retentionDays",
   RESOURCE_PATHS: "resourcePaths",
   LANGUAGE: "language",
